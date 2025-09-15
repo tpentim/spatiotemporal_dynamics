@@ -1,0 +1,1106 @@
+---
+title: Code to reproduce plots in main and supplementary figures using processed single
+  nuclei and spatial RNA sequencing data
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+# Load required packages
+```{r}
+library(Seurat)#v5.1.0
+
+library(dplyr)#v1.1.4
+library(tidyr)#v1.3.1
+
+library(ggplot2)#v3.5.1
+library(pheatmap)#v.0.12
+
+library(RColorBrewer)#v1.1-3
+library(viridis)#v0.6.5
+
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+# Load objects generated with 'data_processing.Rmd'
+```{r}
+# Single nuclei data
+single_nuclei = readRDS('../RDS/single_nuclei.rds') # Single nuclei atlas (12 samples, merged)
+epithelial= readRDS('../RDS/epithelial.rds') # Epithelial cells from single nuclei atlas (integrated)
+
+# Spatial data
+primary.obj.list= readRDS('../RDS/primary.obj.list.rds') # Open-ST data of primary tumors (12 samples, list)
+primary_spatial_metadata= bind_rows(lapply(primary.obj.list, function(seurat.obj){return(seurat.obj@meta.data)} ))
+primary_RCTD_scores= bind_rows(lapply(primary.obj.list, function(seurat.obj){as.data.frame(t(GetAssayData(seurat.obj, assay = 'RCTD_cell_states'))) }))
+
+RCTD_niches= readRDS('../RDS/RCTD_niches.rds') # RCTD averages per cellular neighborhood (12 primary samples)
+
+xenograft.obj.list= readRDS('../RDS/xenograft.obj.list.rds') # Open-ST of immunocompetent xenografts (3 samples, list)
+xenograft_spatial_metadata= bind_rows(lapply(xenograft.obj.list, function(seurat.obj){return(seurat.obj@meta.data)} ))
+xenograft_RCTD_scores= bind_rows(lapply(xenograft.obj.list, function(seurat.obj){as.data.frame(t(GetAssayData(seurat.obj, assay = 'RCTD_cell_states'))) }))
+```
+
+# Load color palettes
+```{r}
+celltype_palette= c('Fibroblasts'='tomato',  'Tumor'='black', 'Macrophages'= 'cornflowerblue',
+                    'Hormone sensing'='darkgreen', 'Luminal healthy'='darkgreen', 'Basal'='darkgreen',
+                    'Adipocytes'= '#ffd3b6',   "Endothelium"='#8b6914',  "Pericytes"='#8b6914', 
+                    "Lymphode endothelium"='lightgrey',"Lymphnode stroma"='lightgrey',
+                    "B cells"='lightgrey', "T cells"='lightgrey', "Immune proliferating"='lightgrey', 
+                    "Monocytes"='lightgrey', "migDC"='lightgrey', "pDC"='lightgrey')
+
+spatial_palette= c("Adipocytes"= '#ffd3b6', "Blood vessels"='#8b6914', "Fibroblasts"='tomato', 
+                   "Healthy ducts"='darkgreen', "Tumor"='black',
+                   "Macrophages"='cornflowerblue', "Lymphoid cells"='lightgrey', 
+                   "Nerve"='white', "Muscle"='white', "Low quality"='white')
+
+epithelial_palette= c('Basal healthy'= 'darkseagreen',
+                      'TABACs'=  'darkcyan',
+                      'Hormone sensing'= 'darkolivegreen3',
+                      'Luminal'= "#008744",
+                      'Cell of origin'='yellow',
+                      'Tumor proliferating'= 'burlywood2',
+                      'Tumor transdifferentiating 1'= 'darkgoldenrod1',
+                      'Tumor transdifferentiating 2'= 'coral1',
+                      'Tumor keratinizing'= 'black',
+                      'Tumor Krt73'= 'deeppink2',
+                      'Tumor Wnt'= 'darkorchid2',
+                      'Tumor EMT'= 'darkred')
+
+stromal_palette= c('Fibroblasts 1'='#ffa31a',
+                   'Fibroblasts 2'="#ffa",
+                   'Fibroblasts proliferating'='#DAAE7D',
+                   "iCAFs"= 'plum',
+                   'myCAFs'= 'red',
+                   'Macrophages healthy'= '#acf0fb',
+                   'Macrophages tumor'= '#05d9e8',
+                   'TAM 1'='#00aedb',
+                   'TAM 2'='#005b96')
+
+cell_state_palette= c(epithelial_palette, stromal_palette, celltype_palette[7:17])
+
+niche_palette= c('Adipocyte stroma'= '#ffd3b6', 'Blood vessel'='#8b6914', 'Fibrous stroma'='#ffa31a','Healthy periductal stroma'='#ffa',
+                 'Healthy duct'='#008744', 'Early tumor'='yellow', 'Krt73 tumor'= 'purple', 
+                 'iCAF/Macrophage stroma'='firebrick', 'myCAF/TAM stroma'='red','TAM islands'='#005b96',
+                 'Lymph node'='lightgrey', 'Immune foci'='darkgrey')
+
+gg_color_hue <- function(n) {
+  hues = seq(15, 375, length = n + 1)
+  hcl(h = hues, l = 65, c = 100)[1:n]
+}
+```
+
+# Figure 2
+
+## Fig2a: Single nuclei celltype UMAP
+```{r fig.width=16, fig.height=5}
+DimPlot(single_nuclei, split.by = 'timepoint', group.by = 'cell_types', cols = celltype_palette) + NoAxes() + ggtitle('') + coord_fixed()
+```
+
+## SFig2a: Single nuclei clusters UMAP
+```{r fig.width=8, fig.height= 5}
+DimPlot(single_nuclei, group.by = 'cell_types', label = F, cols  = sample(gg_color_hue(17), size = 17, replace = F) ) + NoAxes() + coord_fixed() + ggtitle('')
+```
+
+## SFig2b: Single nuclei celltype marker dotplot
+```{r fig.height=5, fig.width=8}
+DotPlot(single_nuclei, features = c('Ptprc','Cd3e', 'Pax5', 'Mki67', 'Clec9a','Flt3','Ccr7','Cd33','Mrc1', 'Adipoq','Fap', 'Col1a1', 'Rgs5', 'Ccl21a', 'Cdh5', 'Epcam','Pgr', 'Erbb4', 'Cdh1','Trp63'), 
+        group.by = 'cell_types', dot.min = 0.2, col.min = 0, col.max = 3) + RotatedAxis()
+```
+
+## Fig 2b: Open-ST spatial clusters
+```{r fig.width= 16, fig.height=4}
+ggplot(primary_spatial_metadata[primary_spatial_metadata$replicate==1,],  
+       aes(x= x_coordinates, y= y_coordinates, col= main_annotation) )+ 
+  geom_point(size=0.01) + theme_void() +
+  facet_wrap('replicate ~ timepoint', scales = 'free', ncol=4) +
+  scale_color_manual(values = spatial_palette)
+```
+
+## SFig2c: Open-ST spatial clusters for replicates
+```{r fig.width=16, fig.height=8}
+ggplot(primary_spatial_metadata[primary_spatial_metadata$replicate !=1,],  
+       aes(x= x_coordinates, y= y_coordinates, col= main_annotation) )+ 
+  geom_point(size=0.01) + theme_void() +
+  facet_wrap('replicate ~ timepoint', scales = 'free', ncol=4) +
+  scale_color_manual(values = spatial_palette)
+```
+
+## Fig2c: RCTD celltype scoring
+```{r fig.width=16, fig.height=4}
+primary_RCTD_celltypes= data.frame(Vascular = rowSums(primary_RCTD_scores[, c("Endothelium","Pericytes")]),
+                                   Lymphoid = rowSums(primary_RCTD_scores[, c("B cells", 'T cells', 'Lymphnode stroma', 'Lymphode endothelium', 'pDC', 'migDC', 'Monocytes')]),
+                                   Macrophages = rowSums(primary_RCTD_scores[, c('Macrophages healthy', 'Macrophages tumor', 'TAM 1', 'TAM 2')]),
+                                   Epithelial = rowSums(primary_RCTD_scores[, c("Luminal", "Basal healthy", "TABACs", "Hormone sensing")]),
+                                   Tumor = rowSums(primary_RCTD_scores[, c("Cell of origin", "Tumor Krt73", "Tumor Wnt", "Tumor EMT", "Tumor transdifferentiating 1", "Tumor transdifferentiating 2","Tumor keratinizing")]),
+                                   Fibroblasts = rowSums(primary_RCTD_scores[, c('Fibroblasts 1','Fibroblasts 2', 'iCAFs', 'myCAFs')]),
+                                   Adipocytes= primary_RCTD_scores[, 'Adipocytes'])
+
+primary_RCTD_celltypes= cbind(primary_spatial_metadata, primary_RCTD_celltypes)
+primary_RCTD_celltypes= primary_RCTD_celltypes[primary_RCTD_celltypes$replicate ==1, ]
+
+ggplot(primary_RCTD_celltypes, aes(x=x_coordinates, y=y_coordinates))+
+  
+  geom_point(data = primary_RCTD_celltypes[primary_RCTD_celltypes$Vascular >0.1, ], mapping = aes(x=x_coordinates, y=y_coordinates, col= Vascular, alpha= Vascular), size=0.1)+
+  scale_color_gradientn(colours =  c('white', "#8b6914"), limits=  c(0,  0.3), oob=scales::squish) +
+  ggnewscale::new_scale_colour()+
+  
+  geom_point(data = primary_RCTD_celltypes[primary_RCTD_celltypes$Lymphoid >0.1, ], mapping = aes(x=x_coordinates, y=y_coordinates, col= Lymphoid, alpha= Lymphoid), size=0.1)+
+  scale_color_gradientn(colours =  c('white', "lightgrey" ), limits=  c(0,  0.3), oob=scales::squish) +
+  ggnewscale::new_scale_colour()+
+  
+  geom_point(data = primary_RCTD_celltypes[primary_RCTD_celltypes$Macrophages >0.1, ], mapping = aes(x=x_coordinates, y=y_coordinates, col= Macrophages, alpha= Macrophages), size=0.1)+
+  scale_color_gradientn(colours =  c('white', 'cornflowerblue'), limits=  c(0,  0.3), oob=scales::squish) +
+  ggnewscale::new_scale_colour()+
+  
+  geom_point(data = primary_RCTD_celltypes[primary_RCTD_celltypes$Epithelial >0.5, ], mapping = aes(x=x_coordinates, y=y_coordinates, col= Epithelial, alpha= Epithelial), size=0.1)+
+  scale_color_gradientn(colours =  c('white', 'darkgreen'), limits= c(0,  0.9), oob=scales::squish) +
+  ggnewscale::new_scale_colour()+
+  
+  geom_point(data = primary_RCTD_celltypes[primary_RCTD_celltypes$Tumor >0.5, ], mapping = aes(x=x_coordinates, y=y_coordinates, col= Tumor, alpha= Tumor), size=0.1)+
+  scale_color_gradientn(colours =  c('white', 'black'), limits= c(0,  0.9), oob=scales::squish) +
+  ggnewscale::new_scale_colour()+
+  
+  geom_point(data = primary_RCTD_celltypes[primary_RCTD_celltypes$Fibroblasts >0.1, ], mapping = aes(x=x_coordinates, y=y_coordinates, col= Fibroblasts, alpha= Fibroblasts), size=0.1)+
+  scale_color_gradientn(colours =  c('white', 'tomato'), limits=  c(0,  0.3), oob=scales::squish) +
+  ggnewscale::new_scale_colour()+
+  
+    geom_point(data = primary_RCTD_celltypes[primary_RCTD_celltypes$Adipocytes >0.1, ], mapping = aes(x=x_coordinates, y=y_coordinates, col= Adipocytes, alpha= Adipocytes), size=0.1)+
+  scale_color_gradientn(colours =  c('white', "#ffd3b6" ), limits=  c(0,  0.3), oob=scales::squish) +
+  ggnewscale::new_scale_colour()+
+
+  facet_wrap('replicate~timepoint', scales = 'free', ncol=4) + theme_void()
+remove(primary_RCTD_celltypes)
+```
+
+## SFig2d: Lymph node and mammary clusters in single nuclei samples
+```{r fig.width=12, fig.height= 12}
+single_nuclei$tissue= factor(single_nuclei$tissue, levels =c('Mammary gland', 'Lymph node'))
+cbind.data.frame(single_nuclei@reductions$umap.unintegrated@cell.embeddings, sample= single_nuclei$orig.ident, tissue= single_nuclei$tissue ) %>%
+  ggplot(aes(x= umapunintegrated_1, y=umapunintegrated_2, col= tissue)) +
+  geom_point(data= as.data.frame(single_nuclei@reductions$umap.unintegrated@cell.embeddings), mapping =aes(x= umapunintegrated_1, y=umapunintegrated_2), size= 0.00001, col='lightgrey' )+
+  geom_point(size=0.0001) + 
+  coord_fixed() + theme_void() + 
+  facet_wrap('sample', ncol = 3)
+```
+
+## SFig2e: Spatial mapping of lymph node clusters
+```{r fig.width=10, fig.height=6}
+ggplot(primary_spatial_metadata[primary_spatial_metadata$sample_id == 'ST_T2_Rep3', ], aes(x=x_coordinates, y=y_coordinates, col= main_annotation=='Lymph node'))+
+          geom_point(size=0.1)+ theme_void()+ NoAxes() +coord_fixed()
+```
+
+```{r fig.width=12, fig.height=6}
+lymph_node_RCTD= cbind(primary_spatial_metadata[primary_spatial_metadata$sample_id == 'ST_T2_Rep3', c('x_coordinates', 'y_coordinates')], primary_RCTD_scores[primary_spatial_metadata$sample_id == 'ST_T2_Rep3', c('B cells', 'T cells', 'migDC', 'Monocytes', 'pDC', "Lymphnode stroma",  "Lymphode endothelium")] ) %>%
+  pivot_longer(3:9, values_to = 'RCTD_score', names_to = 'celltype')
+
+lymph_node_RCTD$celltype= factor(lymph_node_RCTD$celltype, levels= c('B cells', 'T cells', 'migDC', 'Monocytes', 'pDC', "Lymphnode stroma",  "Lymphode endothelium"))
+
+ggplot(lymph_node_RCTD, aes(x=x_coordinates, y=y_coordinates, col= RCTD_score))+
+          geom_point(size=0.1)+ theme_void()+
+          scale_color_gradientn(colours =  c('lightgrey', 'red'), limits= c(0,  0.5), oob=scales::squish) + NoAxes() +
+  facet_wrap('celltype', ncol=4)
+remove(lymph_node_RCTD)
+```
+
+# Figure 3
+ 
+## Fig3a: Epithelial density
+```{r}
+library(MASS)#v7.3-65
+library(reshape2)#v1.4.4
+library(scales)#v1.3.0
+
+# Extract UMAP coordinates and timepoint metadata
+epithelial_umap= data.frame(epithelial@reductions$umap.epithelial.cca@cell.embeddings, timepoint= epithelial$timepoint)
+epithelial_umap$healthy= epithelial_umap$timepoint=='T0'
+
+# Downsample to the healthy level
+epithelial_umap= slice_sample(epithelial_umap, n = 200, by = healthy)
+
+# Calculate the common x and y range
+xrng = c(-7, 18)
+yrng= c(-11, 11)
+
+d_healthy= kde2d(epithelial_umap$umapepithelialcca_1[epithelial_umap$timepoint == 'T0'] , epithelial_umap$umapepithelialcca_2[epithelial_umap$timepoint == 'T0'], lims=c(xrng, yrng), n=100)
+d_tumor= kde2d(epithelial_umap$umapepithelialcca_1[epithelial_umap$timepoint != 'T0'] , epithelial_umap$umapepithelialcca_2[epithelial_umap$timepoint != 'T0'], lims=c(xrng, yrng), n=100)
+
+# Calculate the difference between the 2d density estimates
+diff12 = d_healthy 
+diff12$z = d_tumor$z - d_healthy$z
+
+# First, add row and column names (x and y grid values) to the z-value matrix
+rownames(diff12$z) = diff12$x
+colnames(diff12$z) = diff12$y
+
+# Now melt it to long format
+diff12.m = melt(diff12$z, id.var=rownames(diff12))
+names(diff12.m) = c("umapepithelialcca_1","umapepithelialcca_2","z")
+
+# Plot difference between tumor and healthy density
+ggplot(diff12.m, aes(umapepithelialcca_1, umapepithelialcca_2, z=z, fill=z)) +
+  geom_point(data= epithelial@reductions$umap.epithelial.cca@cell.embeddings, mapping=aes(x= umapepithelialcca_1, y= umapepithelialcca_2), inherit.aes = F, size= 0.5, col='black')+
+  geom_tile(alpha=0.8) +
+  scale_fill_gradient2(low="blue",mid="white", high="red", midpoint=0, limits= c(-0.005,  0.005), oob=scales::squish) +
+  scale_colour_gradient2(low=muted("blue"), mid="white", high=muted("red"), midpoint=0, limits= c(-0.005,  0.005), oob=scales::squish) +
+  coord_cartesian(xlim=xrng, ylim=yrng) +
+  theme_void()+
+  guides(colour=FALSE) +
+  coord_fixed()
+remove(epithelial_umap, xrng, yrng, d_healthy, d_tumor, diff12, diff12.m)
+```
+
+## Fig3b: Epithelial marker dotplot
+```{r fig.width= 8.5, fig.height= 4}
+DefaultAssay(epithelial)= 'RNA'
+DotPlot(epithelial, features = c('Esr1','Pgr', 'Erbb2', 
+                                 'Krt8','Elf5','Csn2',
+                                 'Top2a', 'Mki67',
+                                 'Krt18', 'Krt7',
+                                 'Dsg3', 'Klk6', 'Klk7', 
+                                 'Krt73', 'Lef1', 
+                                 'Nuak1', 
+                                 'Krt14', 'Trp63', 'Trp73','Lgr5',  'Acta2'), 
+        group.by = 'epithelial_states', dot.min = 0.2, col.min = 0, col.max = 3) + RotatedAxis()
+```
+
+## SFig3a: Epithelial label transfer from Bach et al
+```{r fig.width=12, fig.height= 8}
+DefaultAssay(epithelial)= 'bach'
+FeaturePlot(epithelial, ncol = 4, coord.fixed = T,
+            features = c('Hs',"Avd", 'Lp', 'LpBsl', 
+                         'Tm', 'Bsl1', 'Bsl2','BslG'), pt.size = 0.01, cols = c('lightgrey', 'black'), reduction = 'umap.epithelial.cca', min.cutoff = 0, max.cutoff = 1) * NoAxes()
+DefaultAssay(epithelial)= 'RNA'
+```
+
+## Fig3c: Epithelial UMAP
+```{r}
+DimPlot(epithelial, group.by =  'epithelial_states', label = F, reduction = 'umap.epithelial.cca', cols = epithelial_palette ) + NoAxes() + coord_fixed() + ggtitle('')
+```
+
+## SFig3c: Epithelial timepoints
+```{r fig.width= 14, fig.height=5}
+DimPlot(epithelial, group.by =  'epithelial_states', label = F, reduction = 'umap.epithelial.cca', cols = epithelial_palette, split.by = 'timepoint' ) + NoAxes() + coord_fixed() + ggtitle('')
+```
+
+## Fig3d: Tumor pseudotime
+```{r}
+FeaturePlot(epithelial, 'tumor_pseudotime', reduction = 'umap.epithelial.cca') + NoAxes() + coord_fixed() + ggtitle('') + scale_color_viridis_c(limits= c(0,  1), oob=scales::squish, option = 'B')  
+```
+
+## SFig3c: Luminal-to-basal transdifferentiaton and basal tumor gene sets
+```{r fig.width=9, fig.height=6}
+DefaultAssay(epithelial) = 'RNA'
+FeaturePlot(epithelial, features = c('Wap', 'Krt8', 'Trp63'), ncol = 3, reduction = 'umap.epithelial.cca', min.cutoff = 0, max.cutoff = 3, order = T) * NoAxes() * coord_fixed()
+```
+
+```{r fig.width=12, fig.height=6}
+DefaultAssay(epithelial)= 'GSEA'
+FeaturePlot(epithelial, gsub('_', '-', fixed = T, c("REACTOME_KERATINIZATION", "HALLMARK_WNT_BETA_CATENIN_SIGNALING", "HALLMARK_EPITHELIAL_MESENCHYMAL_TRANSITION")), slot = 'scale.data', cols = c('dodgerblue', 'firebrick'), coord.fixed = T,  reduction = 'umap.epithelial.cca', max.cutoff = 3, min.cutoff = 0, ncol = 3, order = T) *NoAxes() 
+```
+
+## Fig3f: TABAC markers and gene sets
+```{r fig.width=6, fig.height=4}
+DefaultAssay(epithelial) = 'RNA'
+FeaturePlot(epithelial, features = c('Trp73'), ncol = 1, reduction = 'umap.epithelial.cca', min.cutoff = 0, max.cutoff = 3, order = T) * NoAxes() * coord_fixed()
+```
+
+```{r fig.width=6, fig.height=4}
+DefaultAssay(epithelial) = 'GSEA'
+FeaturePlot(epithelial, gsub('_', '-', fixed = T, 'KEGG_HEDGEHOG_SIGNALING_PATHWAY'), slot = 'scale.data', cols = c('dodgerblue', 'firebrick'), coord.fixed = T,  reduction = 'umap.epithelial.cca', max.cutoff = 3, min.cutoff = 0, ncol = 1, order = T) *NoAxes()
+```
+
+## SFig3e: TABAC vulcano
+```{r}
+TABAC_DGE= FindMarkers(epithelial, ident.1 = 'TABACs', ident.2 = 'Basal healthy', group.by = 'epithelial_states', assay = 'RNA')
+TABAC_DGE$gene= rownames(TABAC_DGE)
+
+# Retain only genes expressed in at least 10% of cells in either cluster
+TABAC_DGE = TABAC_DGE[TABAC_DGE$pct.1 > 0.1 | TABAC_DGE$pct.2 > 0.1 ,]
+
+# Compute absolute fold changes
+TABAC_DGE$log2FC= abs(TABAC_DGE$avg_log2FC)
+
+# Compute percentage difference
+TABAC_DGE$perc_difference= TABAC_DGE$pct.1- TABAC_DGE$pct.2
+
+# Scatter plot of fold changes and percentage of expressing cells
+ggplot(TABAC_DGE, aes(x= perc_difference, y= log2FC, col= abs(perc_difference)>0.1 &  log2FC>0.5)) + geom_point()+
+  scale_color_manual(values= c('FALSE'= 'grey', 'TRUE'='red'))+
+  ggrepel::geom_text_repel(TABAC_DGE[TABAC_DGE$gene %in% c('Trp63', 'Krt14', 'Acta2', 'Trp73', 'Ptch1', 'Ptch2', 'Lama1'), ], 
+                           mapping=aes(x= perc_difference, y= log2FC, label=  gene), col= 'black', min.segment.length = 0, max.overlaps = 20) +
+  theme(panel.grid.major = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black"), panel.border = element_blank())+
+  geom_hline(yintercept = 0.5, linetype= 2) + geom_vline(xintercept = c(0.1, -0.1), linetype= 2) +
+  xlim(c(-0.6, 0.6))
+
+remove(TABAC_DGE)
+```
+
+## Fig3h: Stromal density
+```{r}
+stromal_celltypes= c('Fibroblasts 1','Fibroblasts 2',"iCAFs",'myCAFs',
+                     'Macrophages healthy', 'Macrophages tumor', 'TAM 1','TAM 2')
+  
+# Extract UMAP coordinates and timepoint metadata
+stromal_umap= data.frame(single_nuclei@reductions$umap.unintegrated@cell.embeddings[single_nuclei$cell_states %in% stromal_celltypes, ], timepoint= single_nuclei$timepoint[single_nuclei$cell_states %in% stromal_celltypes])
+stromal_umap$healthy= stromal_umap$timepoint=='T0'
+
+# Downsample to the healthy level
+stromal_umap= slice_sample(stromal_umap, n = 4000, by = healthy)
+
+# Calculate the common x and y range
+xrng= range(single_nuclei@reductions$umap.unintegrated@cell.embeddings[, 1])
+yrng= range(single_nuclei@reductions$umap.unintegrated@cell.embeddings[, 2])
+
+d_healthy= kde2d(stromal_umap$umapunintegrated_1[stromal_umap$timepoint == 'T0'] , stromal_umap$umapunintegrated_2[stromal_umap$timepoint == 'T0'], lims=c(xrng, yrng), n=1000)
+d_tumor= kde2d(stromal_umap$umapunintegrated_1[stromal_umap$timepoint != 'T0'] , stromal_umap$umapunintegrated_2[stromal_umap$timepoint != 'T0'], lims=c(xrng, yrng), n=1000)
+
+# Calculate the difference between the 2d density estimates
+diff12 = d_healthy 
+diff12$z = d_tumor$z - d_healthy$z
+
+## Melt data into long format
+# First, add row and column names (x and y grid values) to the z-value matrix
+rownames(diff12$z) = diff12$x
+colnames(diff12$z) = diff12$y
+
+# Now melt it to long format
+diff12.m = melt(diff12$z, id.var=rownames(diff12))
+names(diff12.m) = c("umapunintegrated_1","umapunintegrated_2","z")
+
+# Plot difference between geyser2 and geyser1 density
+ggplot(diff12.m, aes(umapunintegrated_1, umapunintegrated_2, z=z, fill=z)) +
+  geom_point(data= single_nuclei@reductions$umap.unintegrated@cell.embeddings, mapping=aes(x= umapunintegrated_1, y= umapunintegrated_2), inherit.aes = F, size= 0.1, col='lightgrey')+
+  geom_point(data= stromal_umap, mapping=aes(x= umapunintegrated_1, y= umapunintegrated_2), inherit.aes = F, size= 0.1, col='black')+
+  geom_tile(alpha=0.8) +
+  scale_fill_gradient2(low="blue",mid="white", high="red", midpoint=0, limits= c(-0.05,  0.05), oob=scales::squish) +
+  scale_colour_gradient2(low=muted("blue"), mid="white", high=muted("red"), midpoint=0, limits= c(-0.05,  0.05), oob=scales::squish) +
+  coord_cartesian(xlim=xrng, ylim=yrng) +
+  theme_void()+ NoAxes()+
+  coord_fixed()
+
+remove(stromal_celltypes, stromal_umap, xrng, yrng, d_healthy, d_tumor, diff12, diff12.m)
+```
+
+## Fig3i: Stromal marker dotplot
+```{r fig.width= 8, fig.height= 5}
+single_nuclei$stromal_celltypes= factor(single_nuclei$cell_states, levels= c(names(stromal_palette)[c(6:10, 1:5)]))
+
+DotPlot(single_nuclei, features = c('Mrc1', 'Cd163', 'Tgfbi', 'Itgam',
+                                    'Gpnmb',  'Itgax',
+                                    'Fap', 'Dcn', 'Pi16',
+                                    'Mki67', 'Top2a',
+                                    'Chl1', 'C3', 'Cxcl12',
+                                    'Col12a1', 'Ncam1'), group.by = 'stromal_celltypes',
+        dot.min = 0.2, col.min = 0, col.max = 3, idents =  names(stromal_palette)[c(6:10, 1:5)]) + RotatedAxis()
+single_nuclei$stromal_celltypes= NULL
+```
+
+## SFig3g: Bach et al label transfer
+```{r fig.width=12, fig.height= 8}
+DefaultAssay(single_nuclei)= 'bach'
+FeaturePlot(single_nuclei, ncol = 4, coord.fixed = T,
+            features = c('Fb1',"Fb2", 'Fb8', 'Cafs', 
+                         'Mo1', 'Mo3','MdC1', 'Tam1'), pt.size = 0.01, cols = c('lightgrey', 'black'), min.cutoff = 0, max.cutoff = 1) * NoAxes()
+DefaultAssay(single_nuclei)= 'RNA'
+```
+
+## SFig3h: Stromal gene sets
+```{r, fig.height = 5, fig.width= 10}
+DefaultAssay(single_nuclei)= 'cancer_signatures'
+FeaturePlot(single_nuclei, features = rownames(single_nuclei)[c(1, 3, 2)],slot = 'scale.data', min.cutoff = 0, max.cutoff = 3, cols = c('dodgerblue', 'firebrick'), coord.fixed = T, ncol = 3) *NoAxes()
+```
+
+## SFig3i: Stromal markers UMAP
+```{r, fig.height = 8, fig.width= 16}
+DefaultAssay(single_nuclei)= 'RNA'
+FeaturePlot(single_nuclei, features = c('Gpnmb', 'Chl1', 'Ncam1'), ncol = 3,  min.cutoff = 0, max.cutoff = 3, order = T) * NoAxes() * coord_fixed()
+```
+
+## Fig3j: Stromal states UMAP
+```{r fig.width= 12, fig.height= 6}
+DimPlot(single_nuclei, group.by = 'cell_states', label = F, cols= stromal_palette, na.value = 'lightgrey') * NoAxes() * coord_fixed()
+```
+
+# Figure 4
+
+## SFig 4a: Spatial mapping of epithelial and stromal states
+```{r fig.width=12, fig.height=6}
+RCTD_example = cbind(primary_spatial_metadata[primary_spatial_metadata$sample_id == 'ST_T2_Rep1', c('x_coordinates', 'y_coordinates')], primary_RCTD_scores[primary_spatial_metadata$sample_id == 'ST_T2_Rep1', c(c("Hormone sensing","Cell of origin","Tumor keratinizing","Tumor EMT",'TABACs','Adipocytes',"iCAFs", 'myCAFs', 'Macrophages tumor', "TAM 1"))] ) %>%
+  pivot_longer(3:12, values_to = 'RCTD_score', names_to = 'celltype')
+RCTD_example$celltype= factor(RCTD_example$celltype, levels= c("Hormone sensing","Cell of origin","Tumor keratinizing","Tumor EMT",'TABACs','Adipocytes',"iCAFs", 'myCAFs', 'Macrophages tumor', "TAM 1"))
+
+ggplot(RCTD_example, aes(x=x_coordinates, y=y_coordinates, col= RCTD_score))+
+          geom_point(size=0.1)+ theme_void()+
+          scale_color_gradientn(colours =  c('lightgrey', 'red'), limits= c(0,  0.5), oob=scales::squish) + NoAxes() +
+  facet_wrap('celltype', ncol=5)
+remove(RCTD_example)
+```
+
+## Fig4b: Niche UMAP and heatmap (selected)
+```{r}
+DimPlot(RCTD_niches, cols = niche_palette, group.by = 'niches') + NoAxes() + coord_fixed()
+```
+
+```{r fig.width=10, fig.height=6}
+niche_RCTD_scores= scale(t(AverageExpression(RCTD_niches)[['neighbourhood_matrix']][names(cell_state_palette), names(niche_palette)]))
+
+selected_niches= c("Adipocyte stroma", "Healthy periductal stroma", "Healthy duct", "Early tumor", "Krt73 tumor", "iCAF/Macrophage stroma", "myCAF/TAM stroma", "TAM islands")
+selected_ids= names(cell_state_palette)[c(22, 13, 3, 1, 4, 5, 7:11, 16, 19, 20, 17, 2, 12, 21)]
+                                        
+pheatmap(niche_RCTD_scores[selected_niches, selected_ids], 
+         cluster_rows = F, cluster_cols = F, scale='none',
+         annotation_row = data.frame(row.names = selected_niches, niches=  selected_niches), 
+         annotation_colors = list(niches=niche_palette[selected_niches]),
+         angle_col = 45,
+         annotation_legend = F,
+         color=colorRampPalette(colors = c("white",  "red"), 100)(100), breaks = seq(-0,3, length.out=(100 + 1)), 
+         fontsize_row = 10,cellwidth = 6*2, cellheight = 9*2)
+```
+
+## SFig4b: Niche heatmap (all)
+```{r fig.width=12, fig.height=6}
+pheatmap(niche_RCTD_scores[, names(cell_state_palette)[c(22:24, 18, 14, 13, 15, 3, 1, 4, 6, 5, 7:11, 16, 19, 20, 17, 2, 12, 21, 27:32, 26, 25)] ], 
+         cluster_rows = F, cluster_cols = F, scale='none',
+         annotation_row = data.frame(row.names = names(niche_palette), niches= names(niche_palette) ), 
+         annotation_colors = list(niches=niche_palette),
+         angle_col = 45, 
+         annotation_legend = F,
+         color=colorRampPalette(colors = c("white",  "red"), 100)(100), breaks = seq(-0,3, length.out=(100 + 1)), 
+         fontsize_row = 10,cellwidth = 6*2, cellheight = 9*2,
+         gaps_col = c(7, 17, 24))
+remove(niche_RCTD_scores, selected_niches, selected_ids)
+```
+
+## Fig4c: Niche spatial plot
+```{r fig.width=16, fig.height=4}
+ggplot(primary_spatial_metadata[primary_spatial_metadata$replicate==1,],  
+       aes(x= x_coordinates, y= y_coordinates, col= niches) )+ 
+  geom_point(size=0.01) + theme_void() +
+  facet_wrap('replicate ~ timepoint', scales = 'free', ncol=4) +
+  scale_color_manual(values = niche_palette)
+``` 
+
+## SFig4c: Niche spatial plot (replicates)
+```{r fig.width=16, fig.height=8}
+ggplot(primary_spatial_metadata[primary_spatial_metadata$replicate!=1,],  
+       aes(x= x_coordinates, y= y_coordinates, col= niches) )+ 
+  geom_point(size=0.01) + theme_void() +
+  facet_wrap('replicate ~ timepoint', scales = 'free', ncol=4) +
+  scale_color_manual(values = niche_palette)
+``` 
+
+## Fig4d: Tumor pseudotime spatial plot
+```{r fig.width=16, fig.height=4}
+ggplot(primary_spatial_metadata[primary_spatial_metadata$replicate==1,],  
+       aes(x= x_coordinates, y= y_coordinates, col= tumor_pseudotime) )+ 
+  geom_point(size=0.01) + theme_void() +
+  facet_wrap('replicate ~ timepoint', scales = 'free', ncol=4) +
+  scale_color_viridis_c(limits= c(0,  1), oob=scales::squish, option = 'B', direction=1)
+```
+
+## SFig4d: Tumor pseudotime spatial plot (replicates)
+```{r fig.width=16, fig.height=8}
+ggplot(primary_spatial_metadata[primary_spatial_metadata$replicate!=1,],  
+       aes(x= x_coordinates, y= y_coordinates, col= tumor_pseudotime) )+ 
+  geom_point(size=0.01) + theme_void() +
+  facet_wrap('replicate ~ timepoint', scales = 'free', ncol=4) +
+  scale_color_viridis_c(limits= c(0,  1), oob=scales::squish, option = 'B', direction=1)
+```
+
+## Fig4e: Duct isolation spatial plot
+```{r fig.width=16, fig.height=4}
+ggplot(primary_spatial_metadata[primary_spatial_metadata$replicate==1,],  
+       aes(x= x_coordinates, y= y_coordinates, col= duct_number) )+ 
+  geom_point(size=0.01) + 
+  geom_point(primary_spatial_metadata[primary_spatial_metadata$replicate==1 & primary_spatial_metadata$duct_position == 'periductal' & !is.na(primary_spatial_metadata$duct_position), ], mapping= aes(x = x_coordinates, y = y_coordinates), col = 'black', size = 0.1) +
+  theme_void() +
+  facet_wrap('replicate ~ timepoint', scales = 'free', ncol=4) + NoLegend()
+```
+
+## SFig4e: Duct isolation spatial plot (replicates)
+```{r fig.width=16, fig.height=8}
+ggplot(primary_spatial_metadata[primary_spatial_metadata$replicate!=1,],  
+       aes(x= x_coordinates, y= y_coordinates, col= duct_number) )+ 
+  geom_point(size=0.01) + 
+  geom_point(primary_spatial_metadata[primary_spatial_metadata$replicate!=1 & primary_spatial_metadata$duct_position == 'periductal' & !is.na(primary_spatial_metadata$duct_position), ], mapping= aes(x = x_coordinates, y = y_coordinates), col = 'black', size = 0.1) +
+  theme_void() +
+  facet_wrap('replicate ~ timepoint', scales = 'free', ncol=4) + NoLegend()
+```
+
+## Fig4f: Single duct niche plot
+```{r fig.width=16, fig.height=8}
+larger_ducts= names(table(primary_spatial_metadata$duct_number))[table(primary_spatial_metadata$duct_number)> 250]
+
+ggplot(primary_spatial_metadata[primary_spatial_metadata$duct_number %in% larger_ducts,], 
+       aes(x=x_coordinates, y=y_coordinates, col= niches))+geom_point(size=1)+ theme_void()+
+  scale_color_manual(values = niche_palette) + 
+  NoAxes() +  theme(strip.text = element_blank()) +
+  facet_wrap('duct_pseudotime_mean', scales = 'free', ncol= 13) + NoLegend()
+remove(larger_ducts)
+```
+
+# Figure 5
+
+## Fig5a: Exemplary duct (interface) 
+```{r fig.width=5, fig.height=5}
+duct_plot_data= primary_spatial_metadata[primary_spatial_metadata$sample_id== 'ST_T1_Rep1' & primary_spatial_metadata$x_coordinates > 2335000 & primary_spatial_metadata$x_coordinates < 2360000 & primary_spatial_metadata$y_coordinates < -78000 & primary_spatial_metadata$y_coordinates > -101000,]
+
+duct_plot_data= cbind(duct_plot_data, primary_RCTD_scores[rownames(duct_plot_data), ])
+
+ggplot(duct_plot_data, aes(x= x_coordinates, y= y_coordinates, col= duct_position)) +
+  geom_point(size= 0.5) +
+  scale_color_manual(values = c('orange', 'red'))+
+  coord_fixed() + theme_void() + NoAxes()+
+  theme(panel.background = element_rect(fill = "black")) +
+  NoLegend()
+```
+
+## Fig5b: Epithelial dynamics (selected)
+```{r warning=FALSE, fig.width=6, fig.height= 4}
+ductal_cells = primary_spatial_metadata$barcode[primary_spatial_metadata$duct_position == 'intraductal' & !is.na(primary_spatial_metadata$duct_position)]
+
+epithelial_ids= c("Hormone sensing", "Luminal", "Basal healthy",
+                  "Cell of origin",  "Tumor transdifferentiating 1", "Tumor transdifferentiating 2",
+                  "TABACs","Tumor Wnt", "Tumor Krt73","Tumor keratinizing", "Tumor EMT")
+
+duct_matrix = cbind(duct_pseudotime_bin= primary_spatial_metadata[ductal_cells, 'duct_pseudotime_bin'], primary_RCTD_scores[ductal_cells,  epithelial_ids] ) %>%
+  group_by(duct_pseudotime_bin) %>% 
+  summarise_all(mean, na.rm = T) %>%
+  as.data.frame()
+
+duct_matrix= data.frame(duct_pseudotime_bin= as.numeric(duct_matrix$duct_pseudotime_bin), scale(duct_matrix[, 2:ncol(duct_matrix)]))
+colnames(duct_matrix) = gsub('.', ' ', colnames(duct_matrix), fixed = T)
+
+duct_matrix_long= duct_matrix %>% pivot_longer(cols = 2:ncol(duct_matrix), names_to = 'celltype', values_to = 'RCTD_mean_score') 
+duct_matrix_long$celltype= factor(duct_matrix_long$celltype, levels = epithelial_ids)
+
+duct_matrix_long[duct_matrix_long$celltype %in% c("Luminal", "Basal healthy", "Cell of origin",  "Tumor transdifferentiating 1","TABACs", "Tumor keratinizing", "Tumor EMT"), ] %>%
+  ggplot(aes(x= as.numeric(duct_pseudotime_bin), y=RCTD_mean_score, col= celltype))+
+  geom_hline(yintercept = 0, linetype=2) + 
+  geom_point() + geom_smooth(method = "loess", se = F)+ 
+  xlab('Tumor pseudotime') + ylab('Celltype abundance (scaled)') + scale_color_manual(values= cell_state_palette) + ylim(c(-1.8, 1.8))+ NoLegend() + theme_bw()
+remove(duct_matrix_long)
+```
+
+## SFig5a: Heatmap of epithelial dynamics
+```{r fig.width=12, fig.height=6}
+pheatmap(duct_matrix[,epithelial_ids], cluster_rows = F,  cluster_cols = F, angle_col = 45, 
+         show_colnames = T, show_rownames = F,  legend = T, gaps_row = c(1, 2,3, 4),
+         color=colorRampPalette(colors = c("white",  "red"), 100)(100), breaks = seq(-0,2, length.out=(100 + 1)), 
+         annotation_legend = F, fontsize_row = 10,cellwidth = 30, cellheight = 20)
+remove(duct_matrix, epithelial_ids)
+```
+
+## Fig5c: Interface dynamics
+```{r fig.height=6, warning=FALSE}
+periductal_cells = primary_spatial_metadata$barcode[primary_spatial_metadata$duct_position == 'periductal' & !is.na(primary_spatial_metadata$duct_position)]
+
+stromal_ids= c('Adipocytes', "Fibroblasts 1", 'Macrophages healthy', 'Pericytes', 'Endothelium',
+  "iCAFs", 'Macrophages tumor', "TAM 2", "TAM 1", 'myCAFs')
+
+periductal_matrix = cbind(duct_pseudotime_bin= primary_spatial_metadata[periductal_cells, 'duct_pseudotime_bin'], primary_RCTD_scores[periductal_cells,  stromal_ids] ) %>%
+  group_by(duct_pseudotime_bin) %>% 
+  summarise_all(mean, na.rm = T) %>%
+  as.data.frame()
+
+periductal_matrix= data.frame(duct_pseudotime_bin= as.numeric(periductal_matrix$duct_pseudotime_bin), scale(periductal_matrix[, 2:ncol(periductal_matrix)]))
+colnames(periductal_matrix) = gsub('..', '+ ', colnames(periductal_matrix), fixed = T)
+colnames(periductal_matrix) = gsub('.', ' ', colnames(periductal_matrix), fixed = T)
+
+periductal_matrix_long= periductal_matrix %>% pivot_longer(cols = 2:ncol(periductal_matrix), names_to = 'celltype', values_to = 'RCTD_mean_score') 
+periductal_matrix_long$celltype= factor(periductal_matrix_long$celltype, levels = stromal_ids)
+
+periductal_matrix_long[periductal_matrix_long$celltype %in% c('Adipocytes', "Fibroblasts 1", "iCAFs", 'Macrophages tumor', "TAM 2", "TAM 1", 'myCAFs'), ] %>%
+  ggplot(aes(x= as.numeric(duct_pseudotime_bin), y=RCTD_mean_score, col= celltype))+
+  geom_hline(yintercept = 0, linetype=2) + 
+  geom_point() + geom_smooth(method = "loess", se = F)+ 
+  xlab('Tumor pseudotime') + ylab('Celltype abundance (scaled)') + scale_color_manual(values= cell_state_palette) + ylim(c(-1.8, 1.8))+ NoLegend() + theme_bw()
+remove(periductal_matrix_long)
+```
+
+## SFig5a: Heatmap of interface dynamics
+```{r fig.width=12, fig.height=6}
+pheatmap(periductal_matrix[,stromal_ids], cluster_rows = F,  cluster_cols = F, angle_col = 45, 
+         show_colnames = T, show_rownames = F,  legend = T, gaps_row = c(1, 2,3, 4),
+         color=colorRampPalette(colors = c("white",  "red"), 100)(100), breaks = seq(-0,2, length.out=(100 + 1)), 
+         annotation_legend = F, fontsize_row = 10,cellwidth = 30, cellheight = 20)
+remove(periductal_matrix, stromal_ids)
+```
+
+## SFig5b: Celltype marker waves (epithelial and stromal)
+```{r fig.height=6, fig.width=4, warning=FALSE}
+epithelial_markers = c('Erbb4', 'Wap', 'Krt8', 'Krt14', 'Csn2', 'Lef1')
+stromal_markers= c('Adipoq', 'Chl1', 'Mrc1', 'Tgfbi', 'Ncam1', 'Gpnmb' )
+
+spatial_duct_data= bind_rows(lapply(primary.obj.list, function(seurat.obj) {as.data.frame(t(as.matrix(GetAssayData(seurat.obj, assay = 'Spatial')[c(epithelial_markers, stromal_markers), colnames(seurat.obj) %in% c(ductal_cells, periductal_cells)])))}))
+
+duct_matrix = cbind(duct_pseudotime_bin= primary_spatial_metadata[ductal_cells, 'duct_pseudotime_bin'], spatial_duct_data[ductal_cells,  epithelial_markers] ) %>%
+  group_by(duct_pseudotime_bin) %>% 
+  summarise_all(mean, na.rm = T) %>%
+  as.data.frame()
+
+duct_matrix= data.frame(duct_pseudotime_bin= as.numeric(duct_matrix$duct_pseudotime_bin), scale(duct_matrix[, 2:ncol(duct_matrix)]))
+colnames(duct_matrix) = gsub('.', ' ', colnames(duct_matrix), fixed = T)
+
+duct_matrix_long= duct_matrix %>% pivot_longer(cols = 2:ncol(duct_matrix), names_to = 'gene', values_to = 'mean_expression') 
+duct_matrix_long$gene= factor(duct_matrix_long$gene, levels = epithelial_markers)
+
+duct_matrix_long %>%
+  ggplot(aes(x= as.numeric(duct_pseudotime_bin), y=mean_expression, col= gene))+
+  geom_hline(yintercept = 0, linetype=2) + 
+  geom_point() + geom_smooth(method = "loess", se = F)+ 
+  xlab('Tumor pseudotime') + ylab('Gene expression (scaled)') + NoLegend()  + facet_wrap('gene',ncol=2)
+remove(duct_matrix, duct_matrix_long, epithelial_markers, ductal_cells)
+```
+
+```{r fig.height=6, fig.width=4, warning=FALSE}
+periductal_matrix = cbind(duct_pseudotime_bin= primary_spatial_metadata[periductal_cells, 'duct_pseudotime_bin'], spatial_duct_data[periductal_cells,  stromal_markers] ) %>%
+  group_by(duct_pseudotime_bin) %>% 
+  summarise_all(mean, na.rm = T) %>%
+  as.data.frame()
+
+periductal_matrix= data.frame(duct_pseudotime_bin= as.numeric(periductal_matrix$duct_pseudotime_bin), scale(periductal_matrix[, 2:ncol(periductal_matrix)]))
+colnames(periductal_matrix) = gsub('.', ' ', colnames(periductal_matrix), fixed = T)
+
+periductal_matrix_long= periductal_matrix %>% pivot_longer(cols = 2:ncol(periductal_matrix), names_to = 'gene', values_to = 'mean_expression') 
+periductal_matrix_long$gene= factor(periductal_matrix_long$gene, levels = stromal_markers)
+
+periductal_matrix_long %>%
+  ggplot(aes(x= as.numeric(duct_pseudotime_bin), y=mean_expression, col= gene))+
+  geom_hline(yintercept = 0, linetype=2) + 
+  geom_point() + geom_smooth(method = "loess", se = F)+ 
+  xlab('Tumor pseudotime') + ylab('Gene expression (scaled)') + NoLegend()  + facet_wrap('gene',ncol=2)
+remove(stromal_markers, periductal_matrix, periductal_matrix_long, spatial_duct_data)
+```
+
+## Fig5d: Exemplary duct (macrophages and fibroblasts) 
+```{r fig.width=5, fig.height=5}
+ggplot(duct_plot_data, aes(x= x_coordinates, y= y_coordinates)) +
+  geom_point(col='lightgrey', size= 0.5, alpha= 0.3) + 
+  geom_point(data = duct_plot_data[duct_plot_data$`Macrophages tumor` >0.025, ], mapping = aes(x=x_coordinates, y=y_coordinates, col= `Macrophages tumor`), size=1)+
+  scale_color_gradientn(colours =  c("white", "#05d9e1"), limits=  c(0,  0.1), oob=scales::squish) +
+  ggnewscale::new_scale_colour()+
+  geom_point(data = duct_plot_data[duct_plot_data$`TAM 1` >0.025, ], mapping = aes(x=x_coordinates, y=y_coordinates, col= `TAM 1`), size=1)+
+  scale_color_gradientn(colours =  c("white","#00aedb"), limits=  c(0,  0.1), oob=scales::squish) +
+  ggnewscale::new_scale_colour()+
+  geom_point(data = duct_plot_data[duct_plot_data$`TAM 2` >0.025, ], mapping = aes(x=x_coordinates, y=y_coordinates, col= `TAM 2`), size=1)+
+  scale_color_gradientn(colours =  c("white", "#005b99"), limits=  c(0,  0.1), oob=scales::squish) +
+  coord_fixed() + theme_void()+ NoAxes()
+```
+
+```{r fig.width=5, fig.height=5}
+ggplot(duct_plot_data, aes(x= x_coordinates, y= y_coordinates)) +
+  geom_point(col='lightgrey', size= 0.5, alpha= 0.3) + 
+  geom_point(data = duct_plot_data[duct_plot_data$myCAFs >0.025, ], mapping = aes(x=x_coordinates, y=y_coordinates, col= myCAFs), size=1)+
+  scale_color_gradientn(colours =  c("white", 'red'), limits=  c(0,  0.1), oob=scales::squish) +
+  ggnewscale::new_scale_colour()+
+  geom_point(data = duct_plot_data[duct_plot_data$iCAFs >0.025, ], mapping = aes(x=x_coordinates, y=y_coordinates, col= iCAFs), size=1)+
+  scale_color_gradientn(colours =  c("white", 'plum'), limits=  c(0,  0.1), oob=scales::squish) +
+  coord_fixed() + theme_void()  + NoAxes()+ theme(panel.background = element_rect(fill = "transparent"))
+remove(duct_plot_data)
+```
+
+## Fig5f: Phase portraits (macrophages and fibroblasts)
+```{r fig.width= 10, fig.height=4}
+neighbourhood_data = as.data.frame(RCTD_niches@assays$neighbourhood_matrix@layers$counts)
+colnames(neighbourhood_data)= colnames(RCTD_niches)
+neighbourhood_data= as.data.frame(t(neighbourhood_data[, periductal_cells]))
+
+neighbourhood_data$duct_pseudotime_bin = as.character(primary_spatial_metadata[rownames(neighbourhood_data), 'duct_pseudotime_bin'])
+
+ggplot(neighbourhood_data[neighbourhood_data$duct_pseudotime_bin != '(0.00697,0.163]', ], 
+       aes(x= log10(`Macrophages tumor`+0.00001), y= log10(`TAM 1`+0.00001), col =  duct_pseudotime_bin)) +
+  geom_density_2d(linewidth = 1, bins = 5) + theme_bw() + 
+  scale_color_manual(values=inferno(5)[2:5])+ NoLegend() + 
+  geom_abline(slope = 1, linetype=2) + coord_fixed() + xlim(c(-3, 0))+ ylim(c(-3, 0))
+```
+
+```{r}
+ggplot(neighbourhood_data[neighbourhood_data$duct_pseudotime_bin != '(0.00697,0.163]', ], 
+       aes(x= log10(iCAFs+0.00001), y= log10(myCAFs+0.00001), col =  duct_pseudotime_bin)) +
+  geom_density_2d(linewidth = 1, bins = 5) + theme_bw() + 
+  scale_color_manual(values=inferno(5)[2:5])+ NoLegend() + 
+  geom_abline(slope = 1, linetype=2) + coord_fixed() + xlim(c(-3, 0))+ ylim(c(-3, 0))
+```
+
+## SFig5c: Macrophages vs Fibroblast phase portrait
+```{r}
+neighbourhood_data$Fibro = rowSums(neighbourhood_data[, c('Fibroblasts 1', 'iCAFs', 'myCAFs')])
+neighbourhood_data$Macro = rowSums(neighbourhood_data[, c('Macrophages tumor', 'TAM 1', 'TAM 2')])
+
+ggplot(neighbourhood_data, aes(x= log10(Fibro+0.00001), y= log10(Macro+0.00001), col =duct_pseudotime_bin)) + 
+  geom_density_2d(linewidth = 1, bins=5) + theme_bw() + 
+  scale_color_manual(values=inferno(5)[1:5])+ NoLegend() + 
+  geom_abline(slope = 1, linetype=2) + 
+  coord_fixed()+ xlim(c(-2, 0))+ ylim(c(-2, 0))
+remove(neighbourhood_data)
+```
+
+
+# Figure 6
+
+## Stage-enriched ligands
+```{r}
+# Define function to compute log2 fold changes and percentage differences between 2 populations
+compute_ligand_enrichments = function(ligand_matrix= NULL, group_1_cells=NULL, group_2_cells=NULL ){
+  group_1_avg= rowMeans(ligand_matrix[, colnames(ligand_matrix) %in% group_1_cells])
+  pct.1= rowMeans(ligand_matrix[, colnames(ligand_matrix) %in% group_1_cells]>0)
+  
+  group_2_avg= rowMeans(ligand_matrix[, colnames(ligand_matrix) %in% group_2_cells])
+  pct.2= rowMeans(ligand_matrix[, colnames(ligand_matrix) %in% group_2_cells]>0)
+  
+  avg_log2FC= log2(group_1_avg/ group_2_avg)
+  enriched_ligands= data.frame(avg_log2FC, pct.1, pct.2, gene= rownames(ligand_matrix) )
+  enriched_ligands$log2FC= abs(enriched_ligands$avg_log2FC)
+  enriched_ligands$perc_difference= enriched_ligands$pct.1- enriched_ligands$pct.2
+  enriched_ligands= enriched_ligands[enriched_ligands$pct.1>0 & enriched_ligands$pct.2 >0,]
+  remove(group_1_avg, pct.1, group_2_avg, pct.2, avg_log2FC)
+  return(enriched_ligands)
+}
+
+periductal_ligand_scores= bind_rows(lapply(primary.obj.list, function(seurat.obj) {as.data.frame(t(as.matrix(GetAssayData(seurat.obj, assay = 'ligand_scores')[, colnames(seurat.obj) %in% periductal_cells])))}))
+
+stage_specific_ligands= list()
+
+for (stage in c("(0.00697,0.163]", "(0.163,0.318]", "(0.318,0.474]", "(0.474,0.629]","(0.629,0.785]")){
+  print(stage)
+  enriched_ligands= compute_ligand_enrichments(ligand_matrix = t(periductal_ligand_scores), 
+                              group_1_cells = intersect(periductal_cells, primary_spatial_metadata$barcode[primary_spatial_metadata$duct_pseudotime_bin == stage]), 
+                              group_2_cells = intersect(periductal_cells, primary_spatial_metadata$barcode[primary_spatial_metadata$duct_pseudotime_bin != stage]))
+  enriched_ligands$cluster= stage
+  stage_specific_ligands[[as.character(stage)]]= enriched_ligands
+  remove(enriched_ligands, stage)
+}
+stage_specific_ligands= bind_rows(stage_specific_ligands)
+stage_specific_ligands$cluster= factor(stage_specific_ligands$cluster, levels = c("(0.00697,0.163]", "(0.163,0.318]", "(0.318,0.474]", "(0.474,0.629]","(0.629,0.785]") )
+```
+
+## Fig6b: Dynamics of stage I secreted ligands (selected)
+```{r fig.height=6}
+lr_db= CellChat::CellChatDB.mouse$interaction
+
+secreted_ligands= unique(stage_specific_ligands$gene[stage_specific_ligands$avg_log2FC>0 & stage_specific_ligands$pct.1>0.05 & stage_specific_ligands$gene %in% lr_db$ligand[lr_db$annotation == 'Secreted Signaling']])
+
+periductal_ligand_matrix = cbind(duct_pseudotime_bin= primary_spatial_metadata[periductal_cells, 'duct_pseudotime_bin'], periductal_ligand_scores[,  secreted_ligands] ) %>%
+  group_by(duct_pseudotime_bin) %>% 
+  summarise_all(mean, na.rm = T) %>%
+  as.data.frame()
+
+periductal_ligand_matrix= data.frame(duct_pseudotime_bin= as.numeric(periductal_ligand_matrix$duct_pseudotime_bin), scale(periductal_ligand_matrix[, 2:ncol(periductal_ligand_matrix)]))
+
+periductal_ligand_matrix_long= periductal_ligand_matrix %>% pivot_longer(cols = 2:ncol(periductal_ligand_matrix), names_to = 'ligand', values_to = 'ligand_score_mean') 
+
+periductal_ligand_matrix_long[periductal_ligand_matrix_long$ligand %in% c('Tgfb2', 'Csf1',"Ccl6", 'Ccl8'), ] %>%
+  ggplot(aes(x= duct_pseudotime_bin, y=ligand_score_mean, col= ligand))+
+  geom_hline(yintercept = 0, linetype=2) + 
+  geom_point() + geom_smooth(method = "loess", se = F)+ 
+  xlab('Tumor pseudotime stage') + ylab('Ligand activity (scaled)') + scale_color_manual(values=c('Tgfb2'= 'yellow', 'Csf1'='plum','Ccl8'='#00aedb', "Ccl6"= '#00aedb')) + ylim(c(-1.8, 1.8))+ NoLegend()
+remove(periductal_ligand_matrix_long)
+```
+
+## SFig6a: Heatmap of stage-enriched secreted ligands
+```{r fig.width= 6, fig.height= 8}
+rownames(periductal_ligand_matrix)= 1:5
+periductal_ligand_matrix= t(periductal_ligand_matrix[, -1])
+
+ordered_ligands= data.frame(ligand= rownames(periductal_ligand_matrix),
+           peak_niche= factor(colnames(periductal_ligand_matrix)[max.col(periductal_ligand_matrix, ties.method='first')],),
+           peak_value= apply(periductal_ligand_matrix, 1, function(x) max(scale(x)) ))%>% arrange(peak_niche, -peak_value)
+
+pheatmap(periductal_ligand_matrix[ordered_ligands$ligand,], display_numbers = F, 
+         cluster_rows = F, cluster_cols = F, scale='row', fontsize_row = 8,
+         gaps_col = c(1, 2, 3, 4), 
+         gaps_row = c(2, 11, 16),
+         annotation_legend  = F, legend = T,
+         color=colorRampPalette(colors = c("white",  "red"), 100)(100), breaks = seq(-0,3, length.out=(100 + 1)), 
+         cellwidth = 12, cellheight = 10, angle_col = 45)
+
+remove(ordered_ligands)
+```
+
+## SFig6b: Receptor-ligand expression by cell states (single nuclei)
+```{r fig.width= 7, fig.height= 4}
+DefaultAssay(single_nuclei)= 'RNA'
+secreted_ligands= intersect(secreted_ligands, rownames(single_nuclei))
+
+celltype_RL_expression = as.sparse(GetAssayData(single_nuclei, assay = 'RNA', layer = 'data')[secreted_ligands, ])
+celltype_pct_expression= wrMisc::rowGrpMeans(as.data.frame(celltype_RL_expression) > 0, grp = single_nuclei$cell_states)
+
+selected_ids=c("Luminal", "Cell of origin", 
+               'Tumor transdifferentiating 1', "Tumor transdifferentiating 2",
+               "Tumor keratinizing", "Tumor Wnt", "Tumor Krt73", "Tumor EMT",
+               "Basal healthy", 'TABACs',
+               'Fibroblasts 1', "iCAFs", 'myCAFs', 'Macrophages tumor', "TAM 1")
+
+selected_RL_genes = c("Tgfb2", "Tgfbr1", "Tgfbr2","Csf1","Csf1r","Ccl2",  "Ccl6", "Ccl7", "Ccl8", "Ccl12",  "Ccr1",  "Ccr2")
+
+RL_expression = as.sparse(GetAssayData(single_nuclei, assay = 'RNA', layer = 'data')[selected_RL_genes, ])
+RL_pseudobulk= wrMisc::rowGrpMeans(as.data.frame(RL_expression[selected_RL_genes, ]), grp = single_nuclei$cell_states)[, selected_ids]
+RL_pct_expression= wrMisc::rowGrpMeans(as.data.frame(RL_expression) > 0, grp = single_nuclei$cell_states)[, selected_ids]
+RL_pseudobulk[RL_pct_expression < 0.25] = 0 
+RL_pseudobulk= RL_pseudobulk[rowSums(RL_pseudobulk)>0,]
+RL_pseudobulk= log2(RL_pseudobulk+1)
+RL_pseudobulk[RL_pseudobulk>1.5]=1.5
+
+RL_interactions= data.frame(genes= rownames(RL_pseudobulk),
+           peak_state= factor(colnames(RL_pseudobulk)[max.col(RL_pseudobulk, ties.method='first')], levels = selected_ids),
+           peak_value= apply(RL_pseudobulk, 1, function(x) max(x) ))%>% 
+  arrange(peak_state, -peak_value)
+
+pheatmap(RL_pseudobulk,
+          gaps_col = c(2, 4, 8, 10, 12, 13, 14), gaps_row = c(3, 5), 
+          cluster_rows = F, cluster_cols = F, scale='none',
+          color=colorRampPalette(brewer.pal(n = 7, name ="Blues"))(100),
+          display_numbers = F,
+          angle_col = 45, fontsize_col = 8, fontsize_row = 8, cellwidth = 20, cellheight = 20, 
+          show_rownames = T, legend = T)
+remove(secreted_ligands, celltype_RL_expression,celltype_pct_expression, selected_ids, selected_RL_genes,  RL_expression, RL_interactions)
+```
+
+## Fig6c: Early interface signalling network
+```{r}
+ligands= c('Ccl6', 'Ccl8', 'Csf1',  'Tgfb2')
+receptors= c('Ccr2', 'Ccr2','Csf1r', 'Tgfbr2')
+
+edges_list= list()
+for (i in 1:length(ligands)){
+  # Compute pairwise geometric mean
+  interaction_matrix= as.data.frame(RL_pseudobulk[ligands[i], ] %o% RL_pseudobulk[receptors[i], ])
+  # Convert interaction matrix to edge dataframe
+  interaction_matrix$from = rownames(interaction_matrix)
+  
+  edges= interaction_matrix %>% 
+    pivot_longer(cols = 1:ncol(interaction_matrix)-1, names_to ='to', values_to = 'value' ) %>%
+    as.data.frame()
+  
+  edges$ligand_pct= RL_pct_expression[ligands[i], ][edges$from]
+  edges$receptor_pct= RL_pct_expression[receptors[i], ][edges$to]
+  edges$arrows = 'to'
+  edges$label= paste0(ligands[i], '__', receptors[i])
+  edges_list[[i]]= edges[edges$ligand_pct >0.25 & edges$receptor_pct > 0.25, ]
+}
+
+edges= bind_rows(edges_list)
+
+# Avoid overlapping edges
+edges= edges[order(edges$value, decreasing = T), ]
+edges= edges[!duplicated(edges[, c('from', 'to')]), ]
+
+# Create node dataframe
+nodes= data.frame(id= names(cell_state_palette), label=names(cell_state_palette), 
+                  color = cell_state_palette, shadow = TRUE)
+nodes= nodes[nodes$id %in% c(edges$from, edges$to), ]
+
+edges_colors= c("Tgfb2__Tgfbr2" = 'yellow', "Csf1__Csf1r"='plum', "Ccl6__Ccr2"='cyan')
+edges$color= edges_colors[edges$label]
+edges$label= NULL
+
+# Plot celltypes as dots and interaction strenghts as edges
+library(visNetwork)
+
+early_celltypes= c("Basal healthy", "Cell of origin",
+                'Adipocytes',  "Endothelium",  "Pericytes", 'Fibroblasts 1',
+                "iCAFs",'Macrophages tumor', 'TABACs',  "TAM 1")
+
+visNetwork(nodes = nodes[nodes$id %in% early_celltypes,], edges = edges) %>% 
+  visNodes(font=  list(size=10), physics = F)%>%
+  visEdges(smooth = list(enabled = TRUE, type = "diagonalCross"), font=list(size=5) )
+remove(ligands, receptors, edges_list, i, edges_colors, early_celltypes, RL_pseudobulk, RL_pct_expression, interaction_matrix)
+```
+
+## SFig6c: Late interface signalling network
+```{r}
+late_celltypes= c("Tumor EMT","Tumor keratinizing","TAM 1",'myCAFs')
+
+visNetwork(nodes = nodes[nodes$id %in% late_celltypes,], edges = edges) %>% 
+  visNodes(font=  list(size=10), physics = F)%>%
+  visEdges(smooth = list(enabled = TRUE, type = "diagonalCross"), font=list(size=5) )
+remove(late_celltypes, nodes, edges)
+```
+
+## Fig6d: TGFb signaling in cell states (single nuclei)
+```{r fig.width=5, fig.height=5, warning=FALSE}
+TGFb_scores= data.frame(cell_states= single_nuclei$cell_states, FetchData(object = single_nuclei, vars = "HALLMARK-TGF-BETA-SIGNALING", layer = "scale.data") ) 
+TGFb_scores$cell_states= factor(TGFb_scores$cell_states, levels = names(cell_state_palette))
+
+ggplot(TGFb_scores[TGFb_scores$cell_states %in% c('Fibroblasts 1', 'iCAFs', 'myCAFs', 'Macrophages healthy', 'Macrophages tumor', 'TAM 1', 'TAM 2', 'Basal healthy', 'TABACs'), ], aes(x=cell_states, y=gsea_HALLMARK.TGF.BETA.SIGNALING, col=cell_states)) +geom_hline(yintercept = 0, linetype=2)+ geom_boxplot(outliers = F, fill=NA) +RotatedAxis() + theme_bw() +RotatedAxis() + ylim(c(-2, 3)) + scale_color_manual(values = cell_state_palette) + NoLegend() + ylab('TGFb signaling')
+remove(TGFb_scores)
+```
+
+## Fig6f: Dynamics of stage-specific ECM ligands (selected)
+```{r fig.height=6, warning=FALSE}
+ECM_ligands= unique(stage_specific_ligands$gene[stage_specific_ligands$avg_log2FC>0 & stage_specific_ligands$pct.1>0.05 & stage_specific_ligands$gene %in% lr_db$ligand[lr_db$annotation == 'ECM-Receptor']])
+
+periductal_ligand_matrix = cbind(duct_pseudotime_bin= primary_spatial_metadata[periductal_cells, 'duct_pseudotime_bin'], periductal_ligand_scores[,  ECM_ligands] ) %>%
+  group_by(duct_pseudotime_bin) %>% 
+  summarise_all(mean, na.rm = T) %>%
+  as.data.frame()
+
+periductal_ligand_matrix= data.frame(duct_pseudotime_bin= as.numeric(periductal_ligand_matrix$duct_pseudotime_bin), scale(periductal_ligand_matrix[, 2:ncol(periductal_ligand_matrix)]))
+
+periductal_ligand_matrix_long= periductal_ligand_matrix %>% pivot_longer(cols = 2:ncol(periductal_ligand_matrix), names_to = 'ligand', values_to = 'ligand_score_mean') 
+
+periductal_ligand_matrix_long[periductal_ligand_matrix_long$ligand %in%  c('Tnxb','Tnc','Col1a1','Lamc2'), ] %>%
+  ggplot(aes(x= duct_pseudotime_bin, y=ligand_score_mean, col= ligand))+
+  geom_hline(yintercept = 0, linetype=2) + 
+  geom_point() + geom_smooth(method = "loess", se = F)+ 
+  xlab('Tumor pseudotime stage') + ylab('Ligand activity (scaled)') + scale_color_manual(values=c('Tnc'= 'red', 'Tnxb'='plum','Lamc2'='darkred', 'Col1a1'='grey2')) + ylim(c(-1.8, 1.8))+ NoLegend()
+remove(ECM_ligands, periductal_ligand_matrix_long, lr_db, stage_specific_ligands, periductal_ligand_scores, periductal_cells)
+```
+
+## SFig6d: Heatmap of stage-enriched ECM ligands
+```{r fig.width= 6, fig.height= 8}
+rownames(periductal_ligand_matrix)= 1:5
+periductal_ligand_matrix= t(periductal_ligand_matrix[, -1])
+
+ordered_ligands= data.frame(ligand= rownames(periductal_ligand_matrix),
+           peak_niche= factor(colnames(periductal_ligand_matrix)[max.col(periductal_ligand_matrix, ties.method='first')],),
+           peak_value= apply(periductal_ligand_matrix, 1, function(x) max(scale(x)) ))%>% arrange(peak_niche, -peak_value)
+
+pheatmap(periductal_ligand_matrix[ordered_ligands$ligand,], display_numbers = F, 
+         cluster_rows = F, cluster_cols = F, scale='row', fontsize_row = 8,
+         gaps_col = c(1, 2, 3, 4), 
+         gaps_row = c(4, 7, 11, 12),
+         annotation_legend  = F, legend = T,
+         color=colorRampPalette(colors = c("white",  "red"), 100)(100), breaks = seq(-0,3, length.out=(100 + 1)), 
+         cellwidth = 12, cellheight = 10, angle_col = 45)
+
+remove(periductal_ligand_matrix, ordered_ligands)
+```
+
+## Fig6g: ECM ligand expression by cell states (single nuclei)
+```{r fig.width= 4, fig.height= 4}
+selected_ids=c('Fibroblasts 1', "iCAFs", "myCAFs", 'Luminal' , 'Cell of origin', 'Tumor keratinizing', "Tumor EMT")
+
+ECM_expression = as.sparse(GetAssayData(single_nuclei, assay = 'RNA', layer = 'data')[c('Tnxb','Tnc','Col1a1','Lamc2'), ])
+ECM_pseudobulk= wrMisc::rowGrpMeans(as.data.frame(ECM_expression[c('Tnxb','Tnc','Col1a1','Lamc2'), ]), grp = single_nuclei$cell_states)[, selected_ids]
+ECM_pct_expression= wrMisc::rowGrpMeans(as.data.frame(ECM_expression) > 0, grp = single_nuclei$cell_states)[, selected_ids]
+ECM_pseudobulk[ECM_pct_expression < 0.25] = 0 
+ECM_pseudobulk= log2(ECM_pseudobulk+1)
+ECM_pseudobulk[ECM_pseudobulk>1.5]=1.5
+
+pheatmap(ECM_pseudobulk[, selected_ids], 
+          gaps_col = c(3), gaps_row = c(2, 4), 
+          cluster_rows = F, cluster_cols = F, scale='none',
+          color=colorRampPalette(brewer.pal(n = 7, name ="Blues"))(100),
+          display_numbers = F,
+          angle_col = 45, fontsize_col = 8, fontsize_row = 8, cellwidth = 30, cellheight = 30, show_rownames = T, legend = T)
+remove(selected_ids, ECM_expression, ECM_pseudobulk, ECM_pct_expression)
+```
+
+## Fig6h: ECM organization in cell states (single nuclei)
+```{r fig.width=5, fig.height=5, warning=FALSE}
+ECM_scores= data.frame(cell_states= single_nuclei$cell_states, FetchData(object = single_nuclei, vars = "REACTOME-EXTRACELLULAR-MATRIX-ORGANIZATION", layer = "scale.data") ) 
+ECM_scores$cell_states= factor(ECM_scores$cell_states, levels = names(cell_state_palette))
+
+ggplot(ECM_scores[ECM_scores$cell_states %in% c('Fibroblasts 1', 'iCAFs', 'myCAFs', 'Luminal', 'Cell of origin', 'Tumor keratinizing', 'Tumor EMT', 'Basal healthy', 'TABACs'), ], aes(x=cell_states, y=gsea_REACTOME.EXTRACELLULAR.MATRIX.ORGANIZATION, col=cell_states)) +geom_hline(yintercept = 0, linetype=2)+ geom_boxplot(outliers = F, fill=NA) +RotatedAxis() + theme_bw() +RotatedAxis() + ylim(c(-2, 3)) + scale_color_manual(values = cell_state_palette) + NoLegend() + ylab('ECM organization')
+remove(ECM_scores)
+```
+
+## Fig6i: ECM organization in space (example)
+```{r fig.width=10, fig.height=5}
+ggplot(primary_spatial_metadata[primary_spatial_metadata$sample_id == 'ST_T2_Rep1', ],
+       aes(x= x_coordinates, y= y_coordinates, col= REACTOME_EXTRACELLULAR_MATRIX_ORGANIZATION))+geom_point(size=0.1)+ theme_bw()+
+  scale_color_gradientn(colours =  c('dodgerblue', 'firebrick'), limits= c(0,  2), oob=scales::squish) +
+  NoAxes() + facet_wrap('replicate~timepoint', scales = 'free', ncol=4) + theme(strip.text = element_blank())
+```
+
+## SFig6e: ECM organization in space (all samples)
+```{r fig.width=20, fig.height=12}
+ggplot(primary_spatial_metadata,
+       aes(x= x_coordinates, y= y_coordinates, col= REACTOME_EXTRACELLULAR_MATRIX_ORGANIZATION))+geom_point(size=0.1)+ theme_bw()+
+  scale_color_gradientn(colours =  c('dodgerblue', 'firebrick'), limits= c(0,  2), oob=scales::squish) +
+  NoAxes() + facet_wrap('replicate~timepoint', scales = 'free', ncol=4) + theme(strip.text = element_blank()) 
+```
+
+# Figure 7
+```{r}
+spatial_xenograft_plots= cbind(xenograft_spatial_metadata[, c('x_coordinates', 'y_coordinates', 'sample_id', 'tumor_pseudotime', 'REACTOME_EXTRACELLULAR_MATRIX_ORGANIZATION')],
+                         xenograft_RCTD_scores[, c('Tumor keratinizing', 'Tumor EMT', 'Tumor Wnt', 'Tumor Krt73',
+                                             'iCAFs', 'myCAFs', 'B cells', 'T cells',
+                                             'Macrophages healthy', 'Macrophages tumor', 'TAM 1', 'TAM 2')])
+```
+
+## Fig7c: iCAF & myCAF scoring in xenograft samples 
+```{r fig.width=12, fig.height=4}
+ggplot(spatial_xenograft_plots, aes(x=x_coordinates, y=y_coordinates))+
+  geom_point(data = spatial_xenograft_plots[spatial_xenograft_plots$iCAFs >0.05, ], mapping = aes(x=x_coordinates, y=y_coordinates, col= iCAFs, alpha= iCAFs), size=0.25)+
+  scale_color_gradientn(colours =  c('white', 'plum'), limits=  c(0,  0.25), oob=scales::squish) +
+  ggnewscale::new_scale_colour()+
+  geom_point(data = spatial_xenograft_plots[spatial_xenograft_plots$myCAFs >0.05, ], mapping = aes(x=x_coordinates, y=y_coordinates, col= myCAFs, alpha= myCAFs), size=0.25)+
+  scale_color_gradientn(colours =  c('white', 'red'), limits=  c(0,  0.25), oob=scales::squish) +
+  facet_wrap('sample_id', scales = 'free', ncol=3) + theme_void()
+```
+
+## Fig7d: Tumor Keratinizing & EMT scoring in xenograft samples 
+```{r fig.width=12, fig.height=4}
+ggplot(spatial_xenograft_plots, aes(x=x_coordinates, y=y_coordinates))+
+  geom_point(data = spatial_xenograft_plots[spatial_xenograft_plots$`Tumor keratinizing` >0.25, ], mapping = aes(x=x_coordinates, y=y_coordinates, col= `Tumor keratinizing`, alpha= `Tumor keratinizing`), size=0.25)+
+  scale_color_gradientn(colours =  c('white', 'black'), limits=  c(0,  0.5), oob=scales::squish) +
+  ggnewscale::new_scale_colour()+
+  geom_point(data = spatial_xenograft_plots[spatial_xenograft_plots$`Tumor EMT` >0.25, ], mapping = aes(x=x_coordinates, y=y_coordinates, col= `Tumor EMT`, alpha= `Tumor EMT`), size=0.25)+
+  scale_color_gradientn(colours =  c('white', 'darkred'), limits=  c(0,  0.5), oob=scales::squish) +
+  facet_wrap('sample_id', scales = 'free', ncol=3) + theme_void()
+```
+
+## Fig7e: ECM organization in xenograft samples
+```{r fig.width=15, fig.height=5}
+ggplot(spatial_xenograft_plots, aes(x= x_coordinates, y= y_coordinates, col= REACTOME_EXTRACELLULAR_MATRIX_ORGANIZATION))+geom_point(size=0.1)+ 
+  scale_color_gradientn(colours =  c('dodgerblue', 'firebrick'), limits= c(0,  2), oob=scales::squish) +
+  NoAxes() + facet_wrap('sample_id', scales = 'free', ncol=3) +theme_void()
+```
+
+## SFig7h: T & B cells scoring in xenograft samples 
+```{r fig.width=12, fig.height=4}
+ggplot(spatial_xenograft_plots, aes(x=x_coordinates, y=y_coordinates))+
+  geom_point(data = spatial_xenograft_plots[spatial_xenograft_plots$`B cells` >0.25, ], mapping = aes(x=x_coordinates, y=y_coordinates, col= `B cells`, alpha= `B cells`), size=0.25)+
+  scale_color_gradientn(colours =  c('white', 'blue'), limits=  c(0,  0.5), oob=scales::squish) +
+  ggnewscale::new_scale_colour()+
+  geom_point(data = spatial_xenograft_plots[spatial_xenograft_plots$`T cells` >0.25, ], mapping = aes(x=x_coordinates, y=y_coordinates, col= `T cells`, alpha= `T cells`), size=0.25)+
+  scale_color_gradientn(colours =  c('white', 'red'), limits=  c(0,  0.5), oob=scales::squish) +
+  facet_wrap('sample_id', scales = 'free', ncol=3) + theme_void()
+```
+
+## SFig7i: Macrophages healthy & tumor scoring in xenograft samples 
+```{r fig.width=12, fig.height=4}
+ggplot(spatial_xenograft_plots, aes(x=x_coordinates, y=y_coordinates))+
+  geom_point(data = spatial_xenograft_plots[spatial_xenograft_plots$`Macrophages tumor` >0.25, ], mapping = aes(x=x_coordinates, y=y_coordinates, col= `Macrophages tumor`, alpha= `Macrophages tumor`), size=0.25)+
+  scale_color_gradientn(colours =  c('white', 'blue'), limits=  c(0,  0.5), oob=scales::squish) +
+  ggnewscale::new_scale_colour()+
+  geom_point(data = spatial_xenograft_plots[spatial_xenograft_plots$`Macrophages healthy` >0.25, ], mapping = aes(x=x_coordinates, y=y_coordinates, col= `Macrophages healthy`, alpha= `Macrophages healthy`), size=0.25)+
+  scale_color_gradientn(colours =  c('white', 'red'), limits=  c(0,  0.5), oob=scales::squish) +
+  facet_wrap('sample_id', scales = 'free', ncol=3) + theme_void()
+```
+
+## SFig7j: TAM 1 & 2 scoring in xenograft samples 
+```{r fig.width=12, fig.height=4}
+ggplot(spatial_xenograft_plots, aes(x=x_coordinates, y=y_coordinates))+
+  geom_point(data = spatial_xenograft_plots[spatial_xenograft_plots$`TAM 1` >0.25, ], mapping = aes(x=x_coordinates, y=y_coordinates, col= `TAM 1`, alpha= `TAM 1`), size=0.25)+
+  scale_color_gradientn(colours =  c('white', 'blue'), limits=  c(0,  0.5), oob=scales::squish) +
+  ggnewscale::new_scale_colour()+
+  geom_point(data = spatial_xenograft_plots[spatial_xenograft_plots$`TAM 2` >0.25, ], mapping = aes(x=x_coordinates, y=y_coordinates, col= `TAM 2`, alpha= `TAM 2`), size=0.25)+
+  scale_color_gradientn(colours =  c('white', 'red'), limits=  c(0,  0.5), oob=scales::squish) +
+  facet_wrap('sample_id', scales = 'free', ncol=3) + theme_void()
+```
+
+## SFig7k: Tumor pseudotime scoring in xenograft samples
+```{r fig.width=16, fig.height=4}
+ggplot(spatial_xenograft_plots, aes(x= x_coordinates, y= y_coordinates, col= tumor_pseudotime) )+ 
+  geom_point(size=0.01) + theme_void() +
+  facet_wrap('sample_id', scales = 'free', ncol=3) +
+  scale_color_viridis_c(limits= c(0,  1), oob=scales::squish, option = 'B', direction=1)
+```
+
+## SFig7l: Tumor Wnt & Krt 73 scoring in xenograft samples 
+```{r fig.width=12, fig.height=4}
+ggplot(spatial_xenograft_plots, aes(x=x_coordinates, y=y_coordinates))+
+  geom_point(data = spatial_xenograft_plots[spatial_xenograft_plots$`Tumor Wnt` >0.25, ], mapping = aes(x=x_coordinates, y=y_coordinates, col= `Tumor Wnt`, alpha= `Tumor Wnt`), size=0.25)+
+  scale_color_gradientn(colours =  c('white', 'blue'), limits=  c(0,  0.5), oob=scales::squish) +
+  ggnewscale::new_scale_colour()+
+  geom_point(data = spatial_xenograft_plots[spatial_xenograft_plots$`Tumor Krt73` >0.25, ], mapping = aes(x=x_coordinates, y=y_coordinates, col= `Tumor Krt73`, alpha= `Tumor Krt73`), size=0.25)+
+  scale_color_gradientn(colours =  c('white', 'red'), limits=  c(0,  0.5), oob=scales::squish) +
+  facet_wrap('sample_id', scales = 'free', ncol=3) + theme_void()
+remove(spatial_xenograft_plots)
+```
