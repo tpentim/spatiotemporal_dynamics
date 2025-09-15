@@ -106,7 +106,7 @@ ST_merged= merge(primary.obj.list[[1]], primary.obj.list[-1]) %>% JoinLayers() %
 # Single nuclei processing
 
 ## Import cellranger output (filtered objects)
-```{r eval=FALSE, include=FALSE}
+```{r}
 sn_T0_Rep1= Read10X('path/to/cellranger/output/sn_T0_Rep1/outs/filtered_feature_bc_matrix/') %>% CreateSeuratObject(min.cells = 0, project = 'sn_T0_Rep1') 
 
 sn_T0_Rep2= Read10X('path/to/cellranger/output/sn_T0_Rep2/outs/filtered_feature_bc_matrix/') %>% CreateSeuratObject(min.cells = 0, project = 'sn_T0_Rep2') 
@@ -133,7 +133,7 @@ sn_T3_Rep3= Read10X('path/to/cellranger/output/sn_T3_Rep1/outs/filtered_feature_
 ```
 
 ## Merge individual objectes and add sample-level metadata
-```{r eval=FALSE, include=FALSE}
+```{r}
 single_nuclei= merge(x=sn_T0_Rep1, y=list(sn_T0_Rep2, sn_T0_Rep3, sn_T1_Rep1, sn_T1_Rep2, sn_T1_Rep3, sn_T2_Rep1, sn_T2_Rep2, sn_T2_Rep3, sn_T3_Rep1, sn_T3_Rep2, sn_T3_Rep3), add.cell.ids = c('sn_T0_Rep1','sn_T0_Rep2', 'sn_T0_Rep3', 'sn_T1_Rep1', 'sn_T1_Rep2', 'sn_T1_Rep3', 'sn_T2_Rep1', 'sn_T2_Rep2', 'sn_T2_Rep3', 'sn_T3_Rep1', 'sn_T3_Rep2', 'sn_T3_Rep3'))
 
 single_nuclei$timepoint= unlist(lapply(single_nuclei$orig.ident, function(x){strsplit(x, split = '_')[[1]][2] }))
@@ -142,14 +142,14 @@ remove(sn_T0_Rep1, sn_T0_Rep2, sn_T0_Rep3, sn_T1_Rep1, sn_T1_Rep2, sn_T1_Rep3, s
 ```
 
 ## Remove low quality cells
-```{r eval=FALSE, include=FALSE}
+```{r}
 single_nuclei=single_nuclei%>%PercentageFeatureSet( pattern = "^mt-", col.name = "percent_MT")
 
 single_nuclei= subset(single_nuclei, cells= colnames(single_nuclei)[single_nuclei$nFeature_RNA>1000 & single_nuclei$percent_MT < 0.5])
 ```
 
 ## Remove doublets
-```{r eval=FALSE, include=FALSE}
+```{r}
 library(scDblFinder)#v1.18.0
 
 single_nuclei= JoinLayers(single_nuclei)
@@ -175,7 +175,7 @@ single_nuclei= single_nuclei%>%
 ```
 
 ## Label transfer from Bach et al.
-```{r eval=FALSE, include=FALSE}
+```{r}
 ## Import data from Bach et al 
 bach = readRDS('path/to/BRCA1_SCE.rds') # From http://marionilab.cruk.cam.ac.uk/BRCA1Tumourigenesis
 
@@ -200,7 +200,7 @@ remove(primary.obj.list, features, anchors, predictions.assay, bach, random_1000
 # Cell type identification
 
 ## Selected shared variable genes
-```{r eval=FALSE, include=FALSE}
+```{r}
 gene_stats= HVFInfo(single_nuclei)
 gene_stats= gene_stats[intersect(rownames(single_nuclei), rownames(ST_merged)),]
 
@@ -251,7 +251,7 @@ remove(cancer_signatures, cells_rankings, cells_AUC)
 ```
 
 ## Celtype annotations
-```{r fig.width=8, fig.height=8}
+```{r}
 Idents(single_nuclei) <- 'seurat_clusters'
 single_nuclei <- RenameIdents(object = single_nuclei,
                          '0' = 'T cells',
@@ -956,7 +956,7 @@ remove(cells_rankings, msigdbr_t2g, gs_list, cells_AUC, GSEA_data, import_metada
 
 # Supplementary tables
 ## Supplementary Table 1: Single nuclei celltype markers 
-```{r fig.width= 8, fig.height= 5}
+```{r}
 Idents(single_nuclei) <- 'cell_types'
 single_nuclei_markers= FindAllMarkers(single_nuclei, only.pos = T, min.pct = 0.2, max.cells.per.ident = 500, min.diff.pct = 0.1)
 ```
