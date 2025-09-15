@@ -8,3 +8,5 @@ The script data_processing.Rmd describes how to process single-nuclei data (star
 Alternatively, pre-processed single-nuclei and spatial objects generated with 'data_processing.Rmd' can be downloaded from Zenodo.
 
 Pre-processed object can then be used to reproduce the main and supplementary figures using the 'figure_reproducibility.Rmd' script.
+
+Alternatively, all the output of 'figure_reproducibility.Rmd' in HTML format can be downloaded directly from Zenodo.
