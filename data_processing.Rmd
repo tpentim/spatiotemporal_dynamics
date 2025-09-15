@@ -1,0 +1,976 @@
+---
+title: "Code to process the single nuclei and spatial RNA sequencing data"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r}
+library(Seurat)#v5.1.0
+library(dplyr)#v1.1.4
+library(tidyr)#v1.3.1
+```
+
+# Spatial preprocessing
+## Load unfiltered objects
+```{r}
+ST_T0_Rep1 <- readRDS("/path/to/spacemake/output/ST_T0_Rep1.rds")
+ST_T0_Rep2 <- readRDS("/path/to/spacemake/output/ST_T0_Rep2.rds")
+ST_T0_Rep3 <- readRDS("/path/to/spacemake/output/ST_T0_Rep3.rds")
+
+ST_T1_Rep1 <- readRDS("/path/to/spacemake/output/ST_T1_Rep1.rds")
+ST_T1_Rep2 <- readRDS("/path/to/spacemake/output/ST_T1_Rep2.rds")
+ST_T1_Rep3 <- readRDS("/path/to/spacemake/output/ST_T1_Rep3.rds")
+
+ST_T2_Rep1 <- readRDS("/path/to/spacemake/output/ST_T2_Rep1.rds")
+ST_T2_Rep2 <- readRDS("/path/to/spacemake/output/ST_T2_Rep2.rds")
+ST_T2_Rep3 <- readRDS("/path/to/spacemake/output/ST_T2_Rep3.rds")
+
+ST_T3_Rep1 <- readRDS("/path/to/spacemake/output/ST_T3_Rep1.rds")
+ST_T3_Rep2 <- readRDS("/path/to/spacemake/output/ST_T3_Rep2.rds")
+ST_T3_Rep3 <- readRDS("/path/to/spacemake/output/ST_T3_Rep3.rds")
+```
+
+## Filter based on gene detection (adjusted by sequencing depth)
+```{r}
+ST_T0_Rep1 = subset(ST_T0_Rep1, subset = nFeature_Spatial > 400)
+ST_T0_Rep2 = subset(ST_T0_Rep2, subset = nFeature_Spatial > 100)
+ST_T0_Rep3 = subset(ST_T0_Rep3, subset = nFeature_Spatial > 100)
+
+ST_T1_Rep1 = subset(ST_T1_Rep1, subset = nFeature_Spatial > 100)
+ST_T1_Rep2 = subset(ST_T1_Rep2, subset = nFeature_Spatial > 250)
+ST_T1_Rep3 = subset(ST_T1_Rep3, subset = nFeature_Spatial > 100)
+
+ST_T2_Rep1 = subset(ST_T2_Rep1, subset = nFeature_Spatial > 200)
+ST_T2_Rep2 = subset(ST_T2_Rep2, subset = nFeature_Spatial > 150)
+ST_T2_Rep3 = subset(ST_T2_Rep3, subset = nFeature_Spatial > 200)
+
+ST_T3_Rep1 = subset(ST_T3_Rep1, subset = nFeature_Spatial > 200)
+ST_T3_Rep2 = subset(ST_T3_Rep2, subset = nFeature_Spatial > 100)
+ST_T3_Rep3 = subset(ST_T3_Rep3, subset = nFeature_Spatial > 150)
+
+primary.obj.list= list(ST_T0_Rep1, ST_T0_Rep2, ST_T0_Rep3,
+               ST_T1_Rep1, ST_T1_Rep2, ST_T1_Rep3, 
+               ST_T2_Rep1, ST_T2_Rep2, ST_T2_Rep3, 
+               ST_T3_Rep1, ST_T3_Rep2, ST_T3_Rep3)
+
+remove(ST_T0_Rep1, ST_T0_Rep2, ST_T0_Rep3,ST_T1_Rep1, ST_T1_Rep2, ST_T1_Rep3, ST_T2_Rep1, ST_T2_Rep2, ST_T2_Rep3,ST_T3_Rep1, ST_T3_Rep2, ST_T3_Rep3)
+```
+
+## Enforce unique barcodes
+```{r}
+ST_T0_Rep1= RenameCells(ST_T0_Rep1, new.names = paste0(colnames(ST_T0_Rep1), '_0'))
+ST_T1_Rep2= RenameCells(ST_T1_Rep2, new.names = paste0(colnames(ST_T1_Rep2), '_1'))
+ST_T2_Rep2= RenameCells(ST_T2_Rep2, new.names = paste0(colnames(ST_T2_Rep2), '_2'))
+ST_T3_Rep2= RenameCells(ST_T3_Rep2, new.names = paste0(colnames(ST_T3_Rep2), '_3'))
+ST_T1_Rep3= RenameCells(ST_T1_Rep3, new.names = paste0(colnames(ST_T1_Rep3), '_4'))
+ST_T2_Rep3= RenameCells(ST_T2_Rep3, new.names = paste0(colnames(ST_T2_Rep3), '_5'))
+ST_T0_Rep2= RenameCells(ST_T0_Rep2, new.names = paste0(colnames(ST_T0_Rep2), '_6'))
+ST_T3_Rep3= RenameCells(ST_T3_Rep3, new.names = paste0(colnames(ST_T3_Rep3), '_7'))
+ST_T1_Rep1= RenameCells(ST_T1_Rep1, new.names = paste0(colnames(ST_T1_Rep1), '_8'))
+ST_T3_Rep1= RenameCells(ST_T3_Rep1, new.names = paste0(colnames(ST_T3_Rep1), '_9'))
+ST_T0_Rep3= RenameCells(ST_T0_Rep3, new.names = paste0(colnames(ST_T0_Rep3), '_10'))
+ST_T2_Rep1= RenameCells(ST_T2_Rep1, new.names = paste0(colnames(ST_T2_Rep1), '_11'))
+```
+
+## Add sample-level metadata and adjust coordinates
+```{r}
+primary.obj.list= lapply(primary.obj.list, function(seurat.obj){
+  
+  seurat.obj$timepoint= unlist(lapply(seurat.obj$orig.ident, function(x){strsplit(x, split = '_')[[1]][2] }))
+  seurat.obj$replicate= gsub('Rep', '', unlist(lapply(seurat.obj$orig.ident, function(x){strsplit(x, split = '_')[[1]][3] })))
+  
+  seurat.obj$x_coordinates= seurat.obj$y_pos
+  seurat.obj$y_coordinates= -seurat.obj$x_pos
+  seurat.obj$x_centered= seurat.obj$x_coordinates - min(seurat.obj$x_coordinates)
+  seurat.obj$y_centered= seurat.obj$y_coordinates - min(seurat.obj$y_coordinates)
+  
+  return(seurat.obj)
+} )
+```
+
+## Clustering and dimensionality reduction
+```{r}
+primary.obj.list= lapply(primary.obj.list, FUN = function(seurat.obj){  
+  seurat.obj %>% SCTransform(assay = 'Spatial') %>%
+    RunPCA() %>% FindNeighbors(dims = 1:10) %>% FindClusters()})
+```
+
+## Merge spatial samples
+```{r}
+ST_merged= merge(primary.obj.list[[1]], primary.obj.list[-1]) %>% JoinLayers() %>% 
+  NormalizeData(normalization.method = "LogNormalize",  scale.factor = 10000) %>%
+  FindVariableFeatures(nfeatures=3000)
+```
+
+# Single nuclei processing
+
+## Import cellranger output (filtered objects)
+```{r eval=FALSE, include=FALSE}
+sn_T0_Rep1= Read10X('path/to/cellranger/output/sn_T0_Rep1/outs/filtered_feature_bc_matrix/') %>% CreateSeuratObject(min.cells = 0, project = 'sn_T0_Rep1') 
+
+sn_T0_Rep2= Read10X('path/to/cellranger/output/sn_T0_Rep2/outs/filtered_feature_bc_matrix/') %>% CreateSeuratObject(min.cells = 0, project = 'sn_T0_Rep2') 
+
+sn_T0_Rep3= Read10X('path/to/cellranger/output/sn_T0_Rep1/outs/filtered_feature_bc_matrix/') %>% CreateSeuratObject(min.cells = 0, project = 'sn_T0_Rep3') 
+
+sn_T1_Rep1= Read10X('path/to/cellranger/output/sn_T1_Rep1/outs/filtered_feature_bc_matrix/') %>% CreateSeuratObject(min.cells = 0, project = 'sn_T1_Rep1') 
+
+sn_T1_Rep2= Read10X('path/to/cellranger/output/sn_T1_Rep2/outs/filtered_feature_bc_matrix/') %>% CreateSeuratObject(min.cells = 0, project = 'sn_T1_Rep2') 
+
+sn_T1_Rep3= Read10X('path/to/cellranger/output/sn_T1_Rep1/outs/filtered_feature_bc_matrix/') %>% CreateSeuratObject(min.cells = 0, project = 'sn_T1_Rep3') 
+
+sn_T2_Rep1= Read10X('path/to/cellranger/output/sn_T2_Rep1/outs/filtered_feature_bc_matrix/') %>% CreateSeuratObject(min.cells = 0, project = 'sn_T2_Rep1') 
+
+sn_T2_Rep2= Read10X('path/to/cellranger/output/sn_T2_Rep2/outs/filtered_feature_bc_matrix/') %>% CreateSeuratObject(min.cells = 0, project = 'sn_T2_Rep2') 
+
+sn_T2_Rep3= Read10X('path/to/cellranger/output/sn_T2_Rep1/outs/filtered_feature_bc_matrix/') %>% CreateSeuratObject(min.cells = 0, project = 'sn_T2_Rep3') 
+
+sn_T3_Rep1= Read10X('path/to/cellranger/output/sn_T3_Rep1/outs/filtered_feature_bc_matrix/') %>% CreateSeuratObject(min.cells = 0, project = 'sn_T3_Rep1') 
+
+sn_T3_Rep2= Read10X('path/to/cellranger/output/sn_T3_Rep2/outs/filtered_feature_bc_matrix/') %>% CreateSeuratObject(min.cells = 0, project = 'sn_T3_Rep2') 
+
+sn_T3_Rep3= Read10X('path/to/cellranger/output/sn_T3_Rep1/outs/filtered_feature_bc_matrix/') %>% CreateSeuratObject(min.cells = 0, project = 'sn_T3_Rep3') 
+```
+
+## Merge individual objectes and add sample-level metadata
+```{r eval=FALSE, include=FALSE}
+single_nuclei= merge(x=sn_T0_Rep1, y=list(sn_T0_Rep2, sn_T0_Rep3, sn_T1_Rep1, sn_T1_Rep2, sn_T1_Rep3, sn_T2_Rep1, sn_T2_Rep2, sn_T2_Rep3, sn_T3_Rep1, sn_T3_Rep2, sn_T3_Rep3), add.cell.ids = c('sn_T0_Rep1','sn_T0_Rep2', 'sn_T0_Rep3', 'sn_T1_Rep1', 'sn_T1_Rep2', 'sn_T1_Rep3', 'sn_T2_Rep1', 'sn_T2_Rep2', 'sn_T2_Rep3', 'sn_T3_Rep1', 'sn_T3_Rep2', 'sn_T3_Rep3'))
+
+single_nuclei$timepoint= unlist(lapply(single_nuclei$orig.ident, function(x){strsplit(x, split = '_')[[1]][2] }))
+
+remove(sn_T0_Rep1, sn_T0_Rep2, sn_T0_Rep3, sn_T1_Rep1, sn_T1_Rep2, sn_T1_Rep3, sn_T2_Rep1, sn_T2_Rep2, sn_T2_Rep3, sn_T3_Rep1, sn_T3_Rep2, sn_T3_Rep3)
+```
+
+## Remove low quality cells
+```{r eval=FALSE, include=FALSE}
+single_nuclei=single_nuclei%>%PercentageFeatureSet( pattern = "^mt-", col.name = "percent_MT")
+
+single_nuclei= subset(single_nuclei, cells= colnames(single_nuclei)[single_nuclei$nFeature_RNA>1000 & single_nuclei$percent_MT < 0.5])
+```
+
+## Remove doublets
+```{r eval=FALSE, include=FALSE}
+library(scDblFinder)#v1.18.0
+
+single_nuclei= JoinLayers(single_nuclei)
+
+sce= SingleCellExperiment(assays= list(counts= single_nuclei@assays$RNA$counts))
+sce@colData$orig.ident= single_nuclei$orig.ident
+sce <- scDblFinder(sce, samples = 'orig.ident', BPPARAM=BiocParallel::MulticoreParam(16))
+
+single_nuclei$scDblFinder.score = sce$scDblFinder.score
+remove(sce)
+
+single_nuclei= subset(single_nuclei, cells= colnames(single_nuclei)[single_nuclei$scDblFinder.score < 0.5]) 
+```
+
+## Dimensionality reduction
+```{r}
+single_nuclei= single_nuclei%>% 
+  NormalizeData() %>%
+  ScaleData() %>% 
+  FindVariableFeatures(nfeatures = 3000) %>% 
+  RunPCA() %>%
+  RunUMAP(dims = 1:30)
+```
+
+## Label transfer from Bach et al.
+```{r eval=FALSE, include=FALSE}
+## Import data from Bach et al 
+bach = readRDS('path/to/BRCA1_SCE.rds') # From http://marionilab.cruk.cam.ac.uk/BRCA1Tumourigenesis
+
+## Convert to Seurat object
+bach = as.Seurat(bach)
+
+## Subset to up to 1000 cells per label
+bach$cell_name= colnames(bach)
+random_1000_subset = bach@meta.data %>% group_by(CellTypesFinal) %>% sample_n(1000, replace= T)
+
+bach_1000_subset= subset(bach, cells= unique(random_1000_subset$cell_name))
+
+primary.obj.list= list(bach_1000_subset, single_nuclei)
+features <- SelectIntegrationFeatures(primary.obj.list)
+anchors <- FindTransferAnchors(reference = bach, query = single_nuclei, normalization.method = "LogNormalize",  reference.assay = 'originalexp', query.assay = 'RNA',reduction = 'pcaproject', dims = 1:30, features = features, nn.method= 'rann', eps = 0.5, verbose = T)
+predictions.assay <- TransferData(anchorset = anchors, refdata = bach_1000_subset$CellTypesFinal, prediction.assay = TRUE, 
+                                  weight.reduction = 'pcaproject', dims = 1:30,eps = 0.5 )
+single_nuclei[["bach"]] <- predictions.assay
+remove(primary.obj.list, features, anchors, predictions.assay, bach, random_1000_subset, bach_1000_subset)
+```
+
+# Cell type identification
+
+## Selected shared variable genes
+```{r eval=FALSE, include=FALSE}
+gene_stats= HVFInfo(single_nuclei)
+gene_stats= gene_stats[intersect(rownames(single_nuclei), rownames(ST_merged)),]
+
+gene_stats_spatial= HVFInfo(ST_merged)
+gene_stats$spatial_gmean= gene_stats_spatial[rownames(gene_stats), 'gmean']
+gene_stats$spatial_variance= gene_stats_spatial[rownames(gene_stats), 'variance.standardized']
+
+gene_stats= gene_stats[complete.cases(gene_stats),]
+
+shared_variable_genes= rownames(gene_stats)[gene_stats$variance.standardized > 1 & gene_stats$spatial_variance > 1]
+remove(gene_stats, gene_stats_spatial)
+```
+
+## Clustering on shared variable genes
+```{r}
+DefaultAssay(single_nuclei) =  "RNA"
+
+single_nuclei= single_nuclei%>% 
+  RunPCA(features = shared_variable_genes) %>%
+  FindNeighbors(dims = 1:30) %>% 
+  FindClusters(resolution = 1.5)
+
+remove(shared_variable_genes)
+```
+
+## Scoring published cancer-associated signatures
+```{r}
+library(AUCell)#v1.26.0
+cancer_signatures= readRDS("path/to/signature_list.rds") #From Meyer et al https://www.nature.com/articles/s41467-023-41518-w
+
+DefaultAssay(single_nuclei)= 'RNA'
+single_nuclei= JoinLayers(single_nuclei)
+
+# Rank genes by their expression in each single cell
+cells_rankings = AUCell_buildRankings(as.matrix(GetAssayData(single_nuclei, assay = 'RNA', layer = 'count')), nCores = 40)
+
+# Compute signature enrichments
+cells_AUC = AUCell_calcAUC(as.list(cancer_signatures), cells_rankings, aucMaxRank=nrow(cells_rankings)*0.05, nCores = 40)
+
+# Add gene set scores as a separate assay
+single_nuclei[['cancer_signatures']] = CreateAssayObject(cells_AUC@assays@data$AUC)
+
+# Scale signature scores
+DefaultAssay(single_nuclei) = 'cancer_signatures'
+single_nuclei= ScaleData(single_nuclei)
+
+remove(cancer_signatures, cells_rankings, cells_AUC)
+```
+
+## Celtype annotations
+```{r fig.width=8, fig.height=8}
+Idents(single_nuclei) <- 'seurat_clusters'
+single_nuclei <- RenameIdents(object = single_nuclei,
+                         '0' = 'T cells',
+                         '1' = 'T cells',
+                         '2' = 'Fibroblasts',
+                         '3' = 'B cells',
+                         '4' = 'B cells', 
+                         '5' = 'Tumor',
+                         '6' = 'Macrophages',
+                         '7' = 'Fibroblasts',
+                         '8' = 'migDC',
+                         '9' =  'T cells',
+                         '10' = 'Fibroblasts',
+                         '11' = 'Adipocytes',
+                         '12' = 'Adipocytes',
+                         '13' = 'Luminal healthy',
+                         '14' = 'Tumor',
+                         '15' = 'Adipocytes',
+                         '16' = 'Fibroblasts',
+                         '17' = 'Adipocytes',
+                         '18' = 'Lymphnode stroma',
+                         '19' = 'Macrophages',
+                         '20' = 'Tumor',
+                         '21' = 'Macrophages',
+                         '22' = 'Endothelium',
+                         '23' = 'Basal',
+                         '24' = 'Tumor',
+                         '25' = 'Basal',
+                         '26' = 'Immune proliferating',
+                         '27' = 'Macrophages',
+                         '28' = 'Hormone sensing',
+                         '29' = 'Lymphode endothelium',
+                         '30' = 'pDC',
+                         '31' = 'Tumor',
+                         '32' = 'Tumor',
+                         '33' = 'Pericytes',
+                         '34' = 'Monocytes',
+                         '35' = 'Tumor',
+                         '36' = 'Fibroblasts')
+
+single_nuclei$cell_types <- factor(Idents(single_nuclei), levels= rev(c('T cells', 'B cells', 'Immune proliferating', 'pDC', 'migDC', 'Monocytes', 'Macrophages', 'Adipocytes',  'Fibroblasts', 'Pericytes', 'Lymphnode stroma',  'Endothelium', 'Lymphode endothelium',  'Hormone sensing', 'Luminal healthy', 'Tumor','Basal')))
+
+Idents(single_nuclei) <- 'seurat_clusters'
+single_nuclei <- RenameIdents(object = single_nuclei,
+                         '0' = 'T cells',
+                         '1' = 'T cells',
+                         '2' = 'Fibroblasts 1',
+                         '3' = 'B cells',
+                         '4' = 'B cells', 
+                         '5' = 'Tumor',
+                         '6' = 'Macrophages tumor',
+                         '7' = 'Fibroblasts 2',
+                         '8' = 'migDC',
+                         '9' =  'T cells',
+                         '10' = 'iCAFs',
+                         '11' = 'Adipocytes',
+                         '12' = 'Adipocytes',
+                         '13' = 'Luminal healthy',
+                         '14' = 'Tumor',
+                         '15' = 'Adipocytes',
+                         '16' = 'myCAFs',
+                         '17' = 'Adipocytes',
+                         '18' = 'Lymphnode stroma',
+                         '19' = 'TAM 2',
+                         '20' = 'Tumor',
+                         '21' = 'TAM 1',
+                         '22' = 'Endothelium',
+                         '23' = 'TABACs',
+                         '24' = 'Tumor',
+                         '25' = 'Basal healthy',
+                         '26' = 'Immune proliferating',
+                         '27' = 'Macrophages healthy',
+                         '28' = 'Hormone sensing',
+                         '29' = 'Lymphode endothelium',
+                         '30' = 'pDC',
+                         '31' = 'Tumor',
+                         '32' = 'Tumor',
+                         '33' = 'Pericytes',
+                         '34' = 'Monocytes',
+                         '35' = 'Tumor',
+                         '36' = 'Fibroblasts proliferating')
+
+single_nuclei$cell_states <- factor(Idents(single_nuclei), levels= rev(c('T cells', 'B cells', 'Immune proliferating', 'pDC', 'migDC', 'Monocytes', 'Macrophages healthy', 'Macrophages tumor', 'TAM 1','TAM 2', 'Adipocytes', 'Lymphnode stroma', 'Lymphode endothelium', 'Endothelium', 'Pericytes', 'Fibroblasts 1', 'Fibroblasts 2', 'Fibroblasts proliferating', 'iCAFs', 'myCAFs', 'Hormone sensing', 'Luminal healthy', 'Tumor','Basal healthy', 'TABACs')) )
+```
+
+## Annotation of LN clusters
+```{r}
+single_nuclei$tissue= 'Mammary gland'
+single_nuclei$tissue[single_nuclei$cell_types %in% c('B cells', 'T cells', 'migDC', 'Monocytes', 'pDC', "Lymphnode stroma",  "Lymphode endothelium")]=  'Lymph node'
+```
+
+## Scoring gene set activity in individual cells
+```{r}
+library(msigdbr)#v7.5.1
+
+# Rank gene by their expression in each single cell
+cells_rankings = AUCell_buildRankings(as.matrix(GetAssayData(single_nuclei, assay = 'RNA', layer = 'count')), nCores = 40)
+
+# Retrieve  genes for selected HALLMARK, KEGG and REACTOME gene sets
+msigdbr_t2g = msigdbr(species = 'Mus musculus') %>% dplyr::distinct(gs_name, gene_symbol) %>% as.data.frame()
+gene_sets= data.frame(table(unlist(lapply(msigdbr_t2g$gs_name, function(x){strsplit(x, split = '_')[[1]][1]}))))
+
+msigdbr_t2g= msigdbr_t2g[unlist(lapply(msigdbr_t2g$gs_name, function(x){strsplit(x, split = '_')[[1]][1]})) %in% c('HALLMARK', 'REACTOME'), ]
+
+gs_list= list()
+for (gs in c("HALLMARK_TGF_BETA_SIGNALING", 'REACTOME_EXTRACELLULAR_MATRIX_ORGANIZATION' )){gs_list[[gs]]= msigdbr_t2g$gene_symbol[msigdbr_t2g$gs_name== gs]}
+
+# Compute gene set enrichments
+cells_AUC = AUCell_calcAUC(gs_list, cells_rankings, aucMaxRank=nrow(cells_rankings)*0.05, nCores = 40)
+
+# Add gene set scores as a separate assay
+single_nuclei[['GSEA']] = CreateAssayObject(cells_AUC@assays@data$AUC)
+
+# Scale gene set scores
+DefaultAssay(single_nuclei) = 'GSEA'
+single_nuclei= ScaleData(single_nuclei)
+
+remove(cells_rankings, msigdbr_t2g, gene_sets, gs_list, cells_AUC)
+```
+
+# Epithelial processing
+
+## Epithelial subsetting
+```{r}
+DefaultAssay(single_nuclei) = 'RNA'
+epithelial = subset(single_nuclei, cells = colnames(single_nuclei)[single_nuclei$cell_types %in% c( 'Hormone sensing', 'Luminal healthy', 'Tumor', 'Basal')])
+```
+
+## Epithelial integration
+```{r}
+epithelial[["RNA"]] <- split(epithelial[["RNA"]], f = epithelial$orig.ident)
+
+epithelial <- epithelial %>%
+  NormalizeData() %>% FindVariableFeatures() %>% ScaleData() %>% RunPCA(reduction.name = "pca.epithelial") 
+epithelial <- IntegrateLayers(
+  object = epithelial, method = CCAIntegration,
+  orig.reduction = "pca.epithelial", new.reduction = "epithelial.cca")
+
+epithelial <- epithelial %>%
+  FindNeighbors(reduction = "epithelial.cca", dims = 1:30) %>% FindClusters(cluster.name = "cca_epithelial_clusters") %>%
+  RunUMAP(reduction = "epithelial.cca", dims = 1:30, reduction.name = "umap.epithelial.cca")
+```
+
+## Doublet identification and removal
+```{r}
+FeaturePlot(epithelial, features = c('Pparg', 'Ptprc', 'Mrc1', 'Meg3'), reduction = 'umap.epithelial.cca') +NoLegend() + NoAxes() +coord_fixed()
+
+FeaturePlot(epithelial, features = c('Ptprc','scDblFinder.score'), reduction = 'umap.epithelial.cca') * NoLegend() * NoAxes() *coord_fixed()
+```
+
+```{r}
+Idents(epithelial) = 'cca_epithelial_clusters'
+epithelial <- epithelial %>%
+  subset(idents = c(6, 8, 14), invert=T) %>%
+  FindNeighbors(reduction = "epithelial.cca", dims = 1:30) %>% 
+  FindClusters(cluster.name = "cca_epithelial_clusters", resolution = 0.4) %>%
+  RunUMAP(reduction = "epithelial.cca", dims = 1:30, reduction.name = "umap.epithelial.cca")
+```
+
+## Epithelial annotations 
+```{r}
+Idents(epithelial) <- 'cca_epithelial_clusters'
+epithelial <- RenameIdents(object = epithelial,
+                         '0' = 'Cell of origin',
+                         '1' = 'Luminal',
+                         '2' = 'Tumor proliferating',
+                         '3' = 'Tumor transdifferentiating 1',
+                         '4' = 'Tumor transdifferentiating 2',
+                         '5' = 'Basal healthy',
+                         '6' = 'Tumor transdifferentiating 1',
+                         '7' = 'TABACs',
+                         '8' = 'Tumor keratinizing',
+                         '9' = 'Hormone sensing',
+                         '10' = 'Tumor Krt73',
+                         '11' = 'Tumor Wnt',
+                         '12' = 'Tumor EMT',
+                         '13' = 'Basal healthy')
+
+epithelial$epithelial_states <- factor(Idents(epithelial), levels=c('Hormone sensing', 'Luminal', 'Cell of origin', 'Tumor proliferating', 'Tumor transdifferentiating 1', 'Tumor transdifferentiating 2', 'Tumor keratinizing','Tumor Krt73',  'Tumor Wnt', 'Tumor EMT', 'TABACs', 'Basal healthy'))
+```
+
+## Update cell state annotations
+```{r}
+single_nuclei$epithelial_states = epithelial$epithelial_states
+
+single_nuclei$cell_states= as.character(single_nuclei$cell_states)
+single_nuclei$epithelial_states= as.character(single_nuclei$epithelial_states)
+
+single_nuclei$cell_states[single_nuclei$cell_types %in% c( 'Hormone sensing', 'Luminal healthy', 'Tumor','Basal')] = single_nuclei$epithelial_states[single_nuclei$cell_types %in% c( 'Hormone sensing', 'Luminal healthy', 'Tumor','Basal')]
+
+single_nuclei$cell_states[is.na(single_nuclei$cell_states)] = 'Epithelial doublets'
+```
+
+## Scoring gene set activity in epithelial cells
+```{r}
+epithelial= JoinLayers(epithelial)
+
+# Rank gene by their expression in each single cell
+cells_rankings = AUCell_buildRankings(as.matrix(GetAssayData(epithelial, assay = 'RNA', layer = 'count')), nCores = 40)
+
+# Retrieve  genes for selected HALLMARK, KEGG and REACTOME gene sets
+msigdbr_t2g = msigdbr(species = 'Mus musculus') %>% dplyr::distinct(gs_name, gene_symbol) %>% as.data.frame()
+gene_sets= data.frame(table(unlist(lapply(msigdbr_t2g$gs_name, function(x){strsplit(x, split = '_')[[1]][1]}))))
+
+msigdbr_t2g= msigdbr_t2g[unlist(lapply(msigdbr_t2g$gs_name, function(x){strsplit(x, split = '_')[[1]][1]})) %in% c('HALLMARK', 'KEGG', 'REACTOME'), ]
+
+gene_sets= unique(msigdbr_t2g$gs_name)
+
+gs_list= list()
+for (gs in c("REACTOME_KERATINIZATION", "HALLMARK_WNT_BETA_CATENIN_SIGNALING", "HALLMARK_EPITHELIAL_MESENCHYMAL_TRANSITION", 'KEGG_HEDGEHOG_SIGNALING_PATHWAY')){gs_list[[gs]]= msigdbr_t2g$gene_symbol[msigdbr_t2g$gs_name== gs]}
+
+# Compute gene set enrichments
+cells_AUC = AUCell_calcAUC(gs_list, cells_rankings, aucMaxRank=nrow(cells_rankings)*0.05, nCores = 40)
+
+# Add gene set scores as a separate assay
+epithelial[['GSEA']] = CreateAssayObject(cells_AUC@assays@data$AUC)
+
+# Scale gene set scores
+DefaultAssay(epithelial) = 'GSEA'
+epithelial= ScaleData(epithelial)
+
+remove(cells_rankings, msigdbr_t2g, gene_sets, gs_list, cells_AUC)
+```
+
+## Tumor pseudotime scoring
+```{python}
+import scanpy as sc #v1.9.5
+import pandas as pd #1.5.3
+import palantir #v1.3.2
+
+# Convert Seurat to AnnData
+adata = sc.read_10x_mtx('/path/to/saved/matrix')
+adata.obs =  adata.obs.join(pd.read_csv('//path/to/saved/metadata.csv', index_col=0, dtype='category'))
+
+# Subset tumor cells
+adata= adata[adata.obs['epithelial_states'].isin(['Cell of origin', 'Tumor transdifferentiating 1', 'Tumor transdifferentiating 2', 'Tumor keratinizing','Tumor Krt73',  'Tumor Wnt', 'Tumor EMT'])]
+
+# Normalization and preprocessing
+sc.pp.normalize_per_cell(adata)
+palantir.preprocess.log_transform(adata)
+sc.pp.highly_variable_genes(adata, n_top_genes=1500)
+
+sc.pp.pca(adata)
+sc.pp.neighbors(adata, random_state=0)
+
+# Define start cell as a Wap+ cells from T1
+start_cell = "T1_Rep2_GTTACCCGTGTTCGTA"
+pr_res = palantir.core.run_palantir(
+    adata, start_cell, num_waypoints=500,
+)
+
+# Write results
+pd.DataFrame(adata.obs['palantir_pseudotime']).to_csv('path/to/palantir/output/epithelial_pseudotime.csv')
+```
+
+```{r}
+pseudotime = read.csv('path/to/palantir/output/epithelial_pseudotime.csv', row.names = 1, header = T)
+palantir_pseudotime = pseudotime$palantir_pseudotime/max(pseudotime$palantir_pseudotime)
+names(palantir_pseudotime)= rownames(pseudotime)
+
+epithelial$tumor_pseudotime= 0
+epithelial$tumor_pseudotime= palantir_pseudotime
+
+single_nuclei$tumor_pseudotime= 0
+single_nuclei$tumor_pseudotime= palantir_pseudotime
+
+remove(palantir_pseudotime)
+```
+
+```{r}
+saveRDS(single_nuclei, '../RDS/single_nuclei.rds')
+saveRDS(epithelial, '../RDS/epithelial.rds')
+```
+
+# Run RCTD on spatial samples 
+
+## Define RCTD function
+```{r}
+library(spacexr)#v2.2.1
+
+run_RCTD_merged = function(coords=NULL, counts=NULL, sc_reference=NULL){
+  
+  puck <- SpatialRNA(coords = coords, counts = counts)
+  myRCTD <- create.RCTD(puck, sc_reference, max_cores = 24)
+  myRCTD <- run.RCTD(myRCTD)
+  return(myRCTD)
+}
+```
+
+## RCTD scoring
+```{r}
+
+# Stitch coordinates
+coords= list()
+for (i in 1:length(primary.obj.list)){coords[[i]]= primary.obj.list[[i]]@meta.data[, c('x_centered', 'y_centered', 'timepoint', 'batch')]}
+coords= bind_rows(coords)
+
+coords$timepoint= as.numeric(factor(coords$timepoint, levels= c('T0', 'T1', 'T2', 'T3')))
+coords$batch= as.numeric(factor(coords$batch, levels= c(3, 2, 1)))
+
+x_spacing = 150000
+y_spacing = 120000
+
+coords$x= coords$x_centered + (coords$timepoint * x_spacing)
+coords$y= coords$y_centered + (coords$batch * y_spacing)
+
+
+reference <- Reference(counts = single_nuclei@assays$RNA$counts[, !single_nuclei$cell_states %in% c('Epithelial doublets', 'Fibroblasts proliferating', 'Immune proliferating', 'Tumor proliferating')], cell_types = as.factor(single_nuclei$cell_states[!single_nuclei$cell_states %in% c('Epithelial doublets', 'Fibroblasts proliferating', 'Immune proliferating', 'Tumor proliferating')]), n_max_cells = 500)
+
+RCTD_merged= run_RCTD_merged(coords=coords[colnames(ST_merged), c('x', 'y')][!ST_merged$main_annotation %in% c("Nerve", "Muscle", "Low quality"), c('x', 'y')],
+                        counts=ST_merged@assays$Spatial$counts[, ! ST_merged$main_annotation %in% c("Nerve", "Muscle", "Low quality")], 
+                        sc_reference=reference)
+
+remove(x_spacing, y_spacing, reference, run_RCTD_merged)
+```
+
+## Add normalized RCTD score as a new assay
+```{r}
+import_RCTD_merged= function(seurat.obj=NULL, RCTD_results=NULL, assay.name='RCTD_cell_states'){
+  print(unique(seurat.obj$sample_id))
+  seurat.obj= subset(seurat.obj, cells= intersect(colnames(RCTD_results), colnames(seurat.obj)))
+  seurat.obj[[assay.name]]= CreateAssay5Object(counts = RCTD_results[, colnames(seurat.obj)], min.cells = 0 )
+  return(seurat.obj)
+}
+
+RCTD_merged_results = t(normalize_weights(RCTD_merged@results$weights))
+
+primary.obj.list= lapply(primary.obj.list, FUN = import_RCTD_merged, RCTD_results=RCTD_merged_results)
+remove(RCTD_merged, RCTD_merged_results, import_RCTD_merged)
+```
+
+# Niche analysis
+## Compute 30-kNN
+```{r}
+library(dbscan)#v1.2-0
+
+# Identify 30 nearest neighbours
+nn <- kNN(coords[, c('x', 'y')], k = 30)
+
+spatial_network = nn$id %>% as.data.frame()
+spatial_network$from= rownames(nn$id)
+
+spatial_network= spatial_network %>% pivot_longer(cols= 1:30, names_to = 'rank', values_to = 'to') %>% as.data.frame()
+spatial_network$to= rownames(nn$id)[spatial_network$to]
+
+distance=  nn$dist %>% as.data.frame() %>% pivot_longer(cols= 1:30, names_to = 'rank', values_to = 'distance') 
+
+# Convert pixel to microns
+spatial_network$distance= distance$distance/30
+
+# Filter out neighbours further than 50µm
+spatial_network= spatial_network[spatial_network$distance < 50, ]
+
+remove(coords, nn, distance)
+```
+
+## Compute neighbourhood RCTD matrix
+```{r}
+primary.obj.list= lapply(primary.obj.list, function(seurat.obj) {
+  RCTD_data= as.matrix(GetAssayData(seurat.obj, assay = 'RCTD_cell_states', layer = 'counts')) %>% t() %>% as.data.frame()
+  RCTD_data$to= rownames(RCTD_data)
+  
+  neighbourhood_matrix= left_join(spatial_network[spatial_network$from %in% rownames(RCTD_data), c('from', 'to')], RCTD_data) %>%
+    pivot_longer(cols= 3:(ncol(RCTD_data)+1), values_to = 'value', names_to = 'feature' ) %>%
+    group_by(from, feature) %>%
+    summarise(value= mean(value, na.rm = T, trim=0.1)) %>%
+    pivot_wider(names_from = 'feature', values_from = 'value', values_fill = 0) %>%
+    as.data.frame()
+  
+  rownames(neighbourhood_matrix)= neighbourhood_matrix$from
+  neighbourhood_matrix$from=NULL
+  neighbourhood_matrix= t(neighbourhood_matrix) %>% as.data.frame()
+  seurat.obj[['RCTD_neighbourhood']]= CreateAssayObject(counts =neighbourhood_matrix[, colnames(neighbourhood_matrix) %in% colnames(seurat.obj)])
+  return(seurat.obj)
+})
+```
+
+## Neighbourhood clustering and dimensionality reduction
+```{r}
+neighbourhood_matrix= bind_cols(lapply(primary.obj.list, function(seurat.obj) {return(as.data.frame(GetAssayData(seurat.obj, assay = 'RCTD_neighbourhood', layer = 'counts')))}))
+metadata=bind_rows(lapply(primary.obj.list, function(seurat.obj) {return(seurat.obj@meta.data[, c('x_coordinates', 'y_coordinates', 'batch', 'replicate', 'sample_id')])}))
+
+RCTD_niches= CreateSeuratObject(counts = neighbourhood_matrix, data = neighbourhood_matrix, assay = 'neighbourhood_matrix', meta.data = metadata) %>%
+  ScaleData() %>% RunPCA(features = rownames(RCTD_niches)) %>% 
+  RunUMAP(dims= 1:6) %>% FindNeighbors(dims= 1:6) %>% FindClusters(resolution=0.4)
+
+remove(neighbourhood_matrix, metadata)
+```
+
+## Niche annotation
+```{r}
+Idents(RCTD_niches) <- 'neighbourhood_matrix_snn_res.0.4'
+
+RCTD_niches <- RenameIdents(object = RCTD_niches,
+                         '0' = 'Adipocyte stroma', 
+                         '1' = 'iCAF/Macrophage stroma',
+                         '2' =  'myCAF/TAM stroma',
+                         '3' =  'iCAF/Macrophage stroma',
+                         '4' =  'iCAF/Macrophage stroma',
+                         '5' =  'myCAF/TAM stroma',
+                         '6' =  'Adipocyte stroma',
+                         '7' =  'Early tumor',
+                         '8' =  'Healthy periductal stroma',
+                         '9' =  'myCAF/TAM stroma', 
+                         '10' =  'Krt73 tumor',
+                         '11' =  'Early tumor', 
+                         '12' =  'Fibrous stroma',
+                         '13' =  'Healthy duct',
+                         '14' =  'Blood vessel', 
+                         '15' = 'Lymph node',   
+                         '16' =  'Krt73 tumor', 
+                         '17' = 'TAM islands', 
+                         '18' =  'Lymph node',
+                         '19' =  'Immune foci',
+                         '20' = 'Adipocyte stroma', 
+                         '21' = 'Lymph node',
+                         '22' = 'Fibrous stroma')
+
+RCTD_niches$niches <- Idents(RCTD_niches)
+RCTD_niches$niches= factor(RCTD_niches$niches, levels = names(niche_palette))
+```
+
+## Add niches as metadata
+```{r}
+primary.obj.list = lapply(primary.obj.list, FUN = function(seurat.obj){seurat.obj$niches= RCTD_niches$niches
+return(seurat.obj)} )
+
+remove(RCTD_niches)
+```
+
+```{r}
+saveRDS(RCTD_niches, '../RDS/RCTD_niches.rds')
+```
+
+# Pseudotime scoring in spatial samples
+```{r}
+# Select shared variable genes
+single_nuclei= single_nuclei %>% DietSeurat(assays = 'RNA', features = shared_variable_genes) %>% SCTransform()
+
+ST_merged=ST_merged %>% subset(features = rownames(single_nuclei)) %>%SCTransform(assay = 'Spatial')
+features= SelectIntegrationFeatures(list(single_nuclei, ST_merged))
+
+# Identify anchors for label transfer
+anchors <- FindTransferAnchors(reference = single_nuclei, query = ST_merged, normalization.method = "SCT",  reference.assay = 'SCT', query.assay = 'SCT', reduction = 'pcaproject', dims = 1:30, features = features, nn.method= 'rann', eps = 0.5, verbose = T)
+
+tumor_pseudotime= t(single_nuclei$tumor_pseudotime)
+rownames(tumor_pseudotime)= 'tumor_pseudotime'
+
+# Transfer pseudotime data
+spatial_pseudotime= TransferData(anchorset = anchors, refdata = epithelial_pseudotime, prediction.assay = TRUE, weight.reduction = 'pcaproject', dims = 1:30, eps = 0.5 )
+
+ST_merged$tumor_pseudotime = NULL
+ST_merged$tumor_pseudotime = spatial_pseudotime@data[1, ]
+
+for (i in 1:length(primary.obj.list)){primary.obj.list[[i]]$tumor_pseudotime=ST_merged$tumor_pseudotime}
+```
+
+# Duct segmentation
+
+## Segment ducts
+```{r}
+library(shiny)
+library(plotly)
+
+ui <- fluidPage(
+    plotlyOutput('myPlot'),
+    verbatimTextOutput("se")
+)
+
+segment_ducts = function(seurat.obj = NULL) {
+  obj.name = unique(seurat.obj$sample_id)
+  
+  plot_data = seurat.obj@meta.data[ , c('x_coordinates', 'y_coordinates','barcode', 'tumor_pseudotime')]
+  colnames(plot_data) = c('x', 'y', 'barcode', 'tumor_pseudotime')
+  
+  DefaultAssay(seurat.obj)= 'RCTD_cell_states'
+  plot_data$Epithelial = colSums(GetAssayData(seurat.obj, assay = 'RCTD_cell_states')[c("Hormone sensing", "Luminal", "Basal healthy", "Cell of origin",  "Tumor transdifferentiating", "Tumor basal","TABACs","Tumor Wnt", "Tumor Krt73","Tumor keratinizing", "Tumor EMT"),])
+  plot_data=plot_data[plot_data$Epithelial > 0.5, ]
+  
+  directory = paste0('/path/to/duct_selection/',obj.name,'/')
+  dir.create(directory)
+  
+  server <- function(input, output, session) {
+    
+    output$myPlot = renderPlotly({
+      plot_ly() %>%
+        add_trace(data = plot_data,x = ~ x,y = ~ y,color = ~ tumor_pseudotime,  mode = 'markers',type = 'scatter',marker = list(size = 1)) %>% #colors= palette,
+        layout(dragmode = "select",xaxis = list(scaleanchor = "y", scaleratio = 1))
+      })
+    
+    output$se <- renderPrint({
+      d <- event_data("plotly_selected")
+      if (nrow(d) > 0) {
+        d = left_join(d[, c('x', 'y')], plot_data[, c('barcode', 'x', 'y')], by =
+                        c('x', 'y'))
+        write.csv(d, paste0(directory, sample(1:1000000, 1), '.csv'))
+      }
+    })
+  }
+  
+  shinyApp(ui, server)
+}
+
+lapply(primary.obj.list, segment_ducts)
+
+remove(ui, segment_ducts)
+```
+
+```{r}
+primary.obj.list= lapply(primary.obj.list, function(seurat.obj) {
+  obj.name =unique(seurat.obj$sample_id)
+  print(obj.name)
+  
+  directory = paste0('/path/to/duct_selection/',obj.name,'/')
+  duct_files = list.files(directory)
+  duct_coordinates = list()
+  
+  for (i in duct_files) {
+    coordinates = read.csv(file = paste0(directory, i),header = T,row.names = 1,dec = '.')
+    coordinates$number = gsub('.csv', '', i)
+    duct_coordinates[[as.character(i)]] = coordinates
+  }
+  duct_coordinates = bind_rows(duct_coordinates)
+  duct_number = paste0(obj.name, '_', duct_coordinates$number)
+  names(duct_number) = duct_coordinates$barcode
+  
+  seurat.obj$duct_number = NULL
+  seurat.obj$duct_number = duct_number
+  
+  print(ggplot(seurat.obj@meta.data, aes(x = x_coordinates, y = y_coordinates, col = duct_number)) +
+          geom_point(size = 0.1) + theme_void() + NoLegend() + coord_fixed())
+  return(seurat.obj)
+})
+```
+
+## Identify periductal spots
+```{r}
+compute_periductal_spots = function(seurat.obj = NULL, spatial_network=NULL) {
+  obj.name =unique(seurat.obj$sample_id)
+  print(obj.name)
+  
+  seurat.obj$barcode= colnames(seurat.obj)
+  
+  periductal_spatial_network= left_join(seurat.obj@meta.data[!is.na(seurat.obj$duct_number) ,c('barcode', 'duct_number')], 
+                                        spatial_network[, c('from', 'to')], by=c('barcode'='from'))
+  periductal_spatial_network= left_join(seurat.obj@meta.data[is.na(seurat.obj$duct_number), c('barcode', 'x_coordinates', 'y_coordinates') ], periductal_spatial_network[, c('duct_number', 'to')], by=c('barcode'= 'to'))
+  periductal_spatial_network= periductal_spatial_network[!duplicated(periductal_spatial_network$barcode), ]
+  
+  seurat.obj$duct_position = NA
+  seurat.obj$duct_position[!is.na(seurat.obj$duct_number)] = 'intraductal'
+
+  seurat.obj$duct_number_periductal=  left_join(seurat.obj@meta.data[, c('barcode', 'x_coordinates', 'y_coordinates') ], periductal_spatial_network[, c('barcode', 'duct_number')], by='barcode'  )[,'duct_number']
+  
+  seurat.obj$duct_position[!is.na(seurat.obj$duct_number_periductal)] = 'periductal'
+  seurat.obj$duct_number[!is.na(seurat.obj$duct_number_periductal)] = seurat.obj$duct_number_periductal[!is.na(seurat.obj$duct_number_periductal)]
+  
+  print(ggplot(seurat.obj@meta.data, aes(x = x_coordinates, y = y_coordinates, col = duct_number)) +
+          geom_point(size = 0.1) + 
+          geom_point(seurat.obj@meta.data[seurat.obj$duct_position == 'periductal', ], mapping= aes(x = x_coordinates, y = y_pos), col = 'black', size = 0.1) +
+          theme_void() + NoLegend() + coord_fixed())
+  
+  seurat.obj$duct_number_periductal= NULL
+  
+  return(seurat.obj)
+}
+
+primary.obj.list= lapply(primary.obj.list, compute_periductal_spots, spatial_network=spatial_network)
+remove(compute_periductal_spots)
+```
+
+## Compute duct-level metadata (pseudotime ranking)
+```{r}
+duct_metadata = primary_spatial_metadata[primary_spatial_metadata$duct_position== 'intraductal', c('tumor_pseudotime', 'duct_number')] %>% 
+  group_by(duct_number) %>%
+  summarise_all(mean, trim=0) %>% 
+  mutate(pseudotime_bin = cut(tumor_pseudotime, breaks=5)) %>%
+  as.data.frame()
+colnames(duct_metadata)= c("duct_number", "duct_pseudotime_mean", "duct_pseudotime_bin")
+duct_metadata$duct_pseudotime_mean= round(duct_metadata$duct_pseudotime_mean, digits = 4)
+
+import_duct_metadata= function(seurat.obj, duct_metadata=NULL){
+  seurat.obj@meta.data$duct_pseudotime_bin= NULL
+  seurat.obj@meta.data$duct_pseudotime_mean= NULL
+  metadata= left_join(seurat.obj@meta.data, duct_metadata)
+  rownames(metadata)= colnames(seurat.obj)
+  seurat.obj@meta.data= metadata
+  print(seurat.obj@meta.data)
+  return(seurat.obj)
+}
+
+primary.obj.list= lapply(primary.obj.list, import_duct_metadata, duct_metadata=duct_metadata)
+
+remove(duct_metadata, import_duct_metadata)
+```
+
+# Cell-cell interaction analysis
+
+## Prepare CellChat receptor-ligand database
+```{r}
+lr_db= apply(CellChat::CellChatDB.mouse$interaction, MARGIN = 1, 
+      function(row){
+        int= as.character(row['interaction_name_2'])
+        lig= strsplit(int, split = ' - ')[[1]][1]
+        rec= strsplit(int, split = ' - ')[[1]][2]
+        if (grepl('(', rec, fixed = TRUE)) {
+          rec= gsub("[()]", "", rec)
+          rec= strsplit(x = rec, split = '+', fixed = T)[[1]]
+        }
+        
+        return(paste0(lig, '___', rec, '___', row['annotation']  ))
+      } ) 
+
+lr_db= t(as.data.frame(strsplit(unlist(lr_db), split = '___')))
+rownames(lr_db)= 1: nrow(lr_db)
+colnames(lr_db)= c('ligand', 'receptor', 'annotation')
+lr_db= as.data.frame(lr_db)
+
+lr_db$ligand= gsub(' ', '', lr_db$ligand)
+lr_db$receptor= gsub(' ', '', lr_db$receptor)
+lr_db= lr_db[!duplicated(lr_db), ]
+
+lr_db= lr_db[lr_db$ligand %in% rownames(ST_merged) & lr_db$receptor %in% rownames(ST_merged),]
+```
+
+## Compute interaction scores for each ligand in each cell
+```{r}
+interaction_score = function(pair, network){
+    ligand= pair[1]
+    receptor= pair[2]
+    pair_expression = my_giotto_object@raw_exprs[c(ligand, receptor), unique(network$to)] %>% as.data.frame()
+    pair_expression$gene= rownames(pair_expression)
+    pair_expression = pair_expression %>% pivot_longer(cols = 1:ncol(pair_expression)-1, names_to = 'barcodes', values_to = 'expression')
+    pair_expression= pair_expression[pair_expression$expression>0,]
+    network_expr = left_join(network[, 1:2], pair_expression[pair_expression$gene== ligand, ], by=c('from'='barcodes') )
+    colnames(network_expr) = gsub('gene', 'ligand', colnames(network_expr))
+    colnames(network_expr) = gsub('expression', 'ligand_expr', colnames(network_expr))
+    network_expr = left_join(network_expr, pair_expression[pair_expression$gene== receptor, ], by=c('to'='barcodes') )
+    colnames(network_expr) = gsub('gene', 'receptor', colnames(network_expr))
+    colnames(network_expr) = gsub('expression', 'receptor_expr', colnames(network_expr))
+    network_expr= network_expr[complete.cases(network_expr), ]
+    network_expr$RL_mean= apply(network_expr[, c('ligand_expr', 'receptor_expr')], MARGIN = 1, function(x){exp(mean(log(x)))})
+    summary(network_expr$RL_mean)
+    network_expr$interaction= paste0(ligand, '___', receptor)
+    return(network_expr)
+}
+
+lr_scores = apply(lr_db, MARGIN = 1, function(pair){
+    network= left_join(network, interaction_score(pair = pair, network = network))
+    network= network[complete.cases(network), ]
+} )
+lr_scores = bind_rows(lr_scores)
+
+ligands= unlist(lapply(colnames(lr_scores), function(x){strsplit(x, '__')[[1]][1]} ))
+ligand_scores= wrMisc::rowGrpSums(lr_scores, grp = ligands)
+```
+
+## Add ligand scores as a separate assay
+```{r}
+import_ligand_scores= function(seurat.obj=NULL, ligand_scores=NULL, assay.name='ligand_scores'){
+  print(unique(seurat.obj$sample_id))
+  seurat.obj= subset(seurat.obj, cells= intersect(colnames(ligand_scores), colnames(seurat.obj)))
+  seurat.obj[[assay.name]]= CreateAssay5Object(counts = ligand_scores[, colnames(seurat.obj)], min.cells = 0 )
+  return(seurat.obj)
+}
+
+primary.obj.list= lapply(primary.obj.list, FUN = import_ligand_scores, ligand_scores=t(ligand_scores))
+
+remove(import_ligand_scores, ligand_scores)
+```
+
+# Spatial scoring of ECM remodelling in individual cells
+```{r}
+# Rank gene by their expression in each single cell
+cells_rankings = AUCell_buildRankings(as.matrix(GetAssayData(single_nuclei, assay = 'RNA', layer = 'count')), nCores = 40)
+
+# Retrieve  genes for 'REACTOME_EXTRACELLULAR_MATRIX_ORGANIZATION' gene set
+msigdbr_t2g = msigdbr(species = 'Mus musculus') %>% dplyr::distinct(gs_name, gene_symbol) %>% as.data.frame()
+gs_list= list(msigdbr_t2g$gene_symbol[msigdbr_t2g$gs_name== 'REACTOME_EXTRACELLULAR_MATRIX_ORGANIZATION'])
+
+
+# Rank gene by their expression in each single cell
+cells_rankings = AUCell_buildRankings(as.matrix(GetAssayData(ST_merged, assay = 'Spatial', layer = 'counts')), nCores = 40)
+  
+# Compute the enrichment for the selected gene set
+cells_AUC = AUCell_calcAUC(gs_list, cells_rankings, aucMaxRank=nrow(cells_rankings)*0.05, nCores = 40)
+
+# Filter and scale across all samples
+GSEA_data = t(cells_AUC@assays@data$AUC)
+GSEA_data[GSEA_data<0.05]= 0
+GSEA_data= scale(GSEA_data)
+
+# Add enrichment score as metadata
+import_metadata= function(seurat.obj, metadata=NULL, name=NULL){
+  seurat.obj@meta.data[name]= metadata[colnames(seurat.obj), name]
+  return(seurat.obj)
+}
+
+primary.obj.list= lapply(primary.obj.list, import_annotations, metadata=GSEA_data, name= 'REACTOME_EXTRACELLULAR_MATRIX_ORGANIZATION')
+
+remove(cells_rankings, msigdbr_t2g, gs_list, cells_AUC, GSEA_data, import_metadata)
+```
+
+# Supplementary tables
+## Supplementary Table 1: Single nuclei celltype markers 
+```{r fig.width= 8, fig.height= 5}
+Idents(single_nuclei) <- 'cell_types'
+single_nuclei_markers= FindAllMarkers(single_nuclei, only.pos = T, min.pct = 0.2, max.cells.per.ident = 500, min.diff.pct = 0.1)
+```
+
+## Supplementary Table 2: Single nuclei epithelial state markers 
+```{r}
+Idents(epithelial) <- 'epithelial_annotations'
+epithelial_markers= FindAllMarkers(epithelial, only.pos = T, min.pct = 0.2, max.cells.per.ident = 500, min.diff.pct = 0.1)
+remove(epithelial_markers)
+```
+
+## Supplementary Table 3: Single nuclei stromal state markers
+```{r}
+Idents(single_nuclei) <- 'cell_states'
+stromal_state_markers = single_nuclei_markers[single_nuclei_markers$cluster %in% names(stromal_palette),]
+remove(single_nuclei_markers, stromal_state_markers)
+```
