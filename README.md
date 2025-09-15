@@ -1,4 +1,4 @@
-# Code repository for Lisek, Theurillat, Pentimalli et al 'Spatiotemporal dynamics of tumor microenvironment remodelling' bioRxiv 2025
+# Code repository for Lisek*, Theurillat*, Pentimalli* et al 'Spatiotemporal dynamics of tumor microenvironment remodelling' bioRxiv 2025
 
 Raw data can be downloaded from GEO (after publication).
 
